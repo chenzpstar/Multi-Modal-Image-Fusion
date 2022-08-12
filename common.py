@@ -40,7 +40,7 @@ def setup_seed(seed=0, benchmark=False, deterministic=True):
 
 def setup_dist(rank=0, world_size=1):
     os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '12345'
+    # os.environ['MASTER_PORT'] = '12345'
     os.environ['RANK'] = str(rank)
     os.environ['WORLD_SIZE'] = str(world_size)
 

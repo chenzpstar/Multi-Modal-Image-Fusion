@@ -213,5 +213,7 @@ if __name__ == '__main__':
     y = torch.rand(2, 1, 224, 224)
 
     loss1, loss2 = model(x1, x2, y)
+    print(loss1.item()), print(loss2.item())
+
     total_loss = loss1 + loss2 * 0.1
     print(total_loss.item())

@@ -80,8 +80,8 @@ if __name__ == '__main__':
     sys.path.append(os.path.join(BASE_DIR, '..'))
 
     # 0. config
-    root_path = os.path.join('..', '..', 'data', 'train')
-    # root_path = os.path.join('..', '..', 'data', 'valid')
+    root_path = os.path.join(BASE_DIR, '..', '..', 'data', 'train')
+    # root_path = os.path.join(BASE_DIR, '..', '..', 'data', 'valid')
 
     patch_size = 224
     stride = 100

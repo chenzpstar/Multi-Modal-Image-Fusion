@@ -4,7 +4,7 @@ This project is for personal study and under development, please click 'watch' o
 
 ## 1 任务简述
 
-主要任务：实现对可视图像和偏振图像的融合。
+主要任务：实现对强度图像和偏振图像的融合。
 
 ## 2 模型
 

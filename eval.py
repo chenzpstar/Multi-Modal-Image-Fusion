@@ -7,9 +7,14 @@
 """
 
 import os
+import sys
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(os.path.join(BASE_DIR, '..'))
+
+import argparse
 import time
 
 import cv2
@@ -22,8 +27,16 @@ from core.loss import SSIM
 from core.model import *
 from data.dataset import PolarDataset
 
+parser = argparse.ArgumentParser(description='Inference')
+parser.add_argument('--bs', default=1, type=int, help='batch size')
+parser.add_argument('--ckpt',
+                    default=None,
+                    type=str,
+                    help='checkpoint folder name')
+args = parser.parse_args()
 
-def eval(eval_loader, model, loss_fn, device):
+
+def eval(eval_loader, model, eval_fn, device):
     if torch.cuda.is_available():
         torch.cuda.synchronize()
     start_time = time.time()
@@ -32,7 +45,7 @@ def eval(eval_loader, model, loss_fn, device):
 
     eval_ssim = []
 
-    save_path = os.path.join('..', 'results', time_format, 'eval')
+    save_path = os.path.join(ckpt_dir, 'eval')
     if not os.path.isdir(save_path):
         os.makedirs(save_path)
 
@@ -42,8 +55,8 @@ def eval(eval_loader, model, loss_fn, device):
 
         with torch.no_grad():
             pred = model(eval_vis, eval_dolp)
-            ssim = (loss_fn(eval_vis, pred)[0] +
-                    loss_fn(eval_dolp, pred)[0]) * 0.5
+            ssim = (eval_fn(eval_vis, pred)[0] +
+                    eval_fn(eval_dolp, pred)[0]) * 0.5
 
         eval_ssim.append(ssim.item())
         print('iter: {:0>2}, ssim: {:.3%}'.format(idx + 1, ssim.item()))
@@ -68,15 +81,17 @@ if __name__ == '__main__':
     setup_seed(0)
     torch.cuda.empty_cache()
 
-    batch_size = 1
-
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
-    time_format = '2022-08-09_18-50'
-    ckpt_path = os.path.join('..', 'checkpoints', time_format, 'epoch_12.pth')
+    batch_size = args.bs if args.bs else 1
+    time_format = args.ckpt if args.ckpt else '2022-08-09_18-50'
+    ckpt_dir = os.path.join(BASE_DIR, '..', 'runs', time_format)
+    # ckpt_path = os.path.join(ckpt_dir, 'epoch_12.pth')
+    # ckpt_path = os.path.join(ckpt_dir, 'epoch_last.pth')
+    ckpt_path = os.path.join(ckpt_dir, 'epoch_best.pth')
 
     # 1. data
-    eval_path = os.path.join('..', 'data', 'valid')
+    eval_path = os.path.join(BASE_DIR, '..', 'data', 'valid')
     eval_dataset = PolarDataset(eval_path)
     eval_loader = DataLoader(
         eval_dataset,
@@ -88,6 +103,7 @@ if __name__ == '__main__':
 
     # 2. model
     model = PFNetv1().to(device, non_blocking=True)
+
     if os.path.isfile(ckpt_path):
         model.load_state_dict(torch.load(ckpt_path, map_location=device),
                               strict=False)
@@ -95,14 +111,13 @@ if __name__ == '__main__':
         raise FileNotFoundError(
             'please check your path to checkpoint file: {}'.format(ckpt_path))
 
-    loss_fn = SSIM(val_range=1, size_average=True,
-                   full=True).to(device, non_blocking=True)
+    eval_fn = SSIM(val_range=1, size_average=True, full=True)
 
     # 3. eval
     eval_ssim = eval(
         eval_loader=eval_loader,
         model=model,
-        loss_fn=loss_fn,
+        eval_fn=eval_fn,
         device=device,
     )
     print('eval ssim: {:.3%}'.format(eval_ssim))

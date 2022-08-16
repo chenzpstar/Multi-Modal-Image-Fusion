@@ -4,6 +4,7 @@
 # @author     : chenzhanpeng https://github.com/chenzpstar
 # @date       : 2022-08-05
 # @brief      : 图像块生成
+# @reference  : https://github.com/Junchao2018/Polarization-image-fusion/blob/master/GenerateTrainingPatches_Tensorflow.m
 """
 
 import os
@@ -103,7 +104,8 @@ if __name__ == '__main__':
         patches[count:] = patches[:pad]
 
     print('num patches: {}, batch size: {}, num iters: {}'.format(
-        patches.shape[0], batch_size, patches.shape[0] // batch_size))
+        len(patches), batch_size,
+        len(patches) // batch_size))
 
     # 3. save patches
     save_path = os.path.join(root_path, 'patches')

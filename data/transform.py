@@ -4,27 +4,30 @@
 # @author     : chenzhanpeng https://github.com/chenzpstar
 # @date       : 2022-08-08
 # @brief      : 图像变换
+# @reference  : https://github.com/Junchao2018/Polarization-image-fusion/blob/master/data_augmentation.py
 """
 
 import numpy as np
 
+eps = 1e-7
+
 
 def norm(img, mode=None):
     if mode is None:
-        return img
+        return img / 255.0
 
-    elif mode == 'max-min':
+    elif mode == 'min-max':
         img_min = img.min()
         img_max = img.max()
         img = (img - img_min) / (img_max - img_min)
 
-    elif mode == 'mean-std':
+    elif mode == 'z-score':
         img_mean = img.mean()
         img_std = img.std()
-        img = (img - img_mean) / img_std.clip(1e-7)
+        img = (img - img_mean) / img_std.clip(eps)
 
     else:
-        raise ValueError("only supported ['max-min', 'mean-var'] mode")
+        raise ValueError("only supported ['min-max', 'z-score'] mode")
 
     return img
 

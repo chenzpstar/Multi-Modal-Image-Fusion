@@ -47,7 +47,10 @@ def setup_dist(rank=0, world_size=1):
     dist.init_process_group('nccl')
 
 
-def reduce_value(value, world_size, average=True):
+def reduce_value(value, world_size=1, average=True):
+    if world_size == 1:
+        return value
+
     with torch.no_grad():
         dist.all_reduce(value)
 

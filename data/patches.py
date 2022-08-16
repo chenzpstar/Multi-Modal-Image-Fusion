@@ -14,9 +14,14 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
+try:
+    from .transform import norm, transform
+except:
+    from transform import norm, transform
+
 
 class PolarDataset(Dataset):
-    def __init__(self, root_path, norm=None, transform=None):
+    def __init__(self, root_path, norm=None, transform=False):
         super(PolarDataset, self).__init__()
         self.root_path = root_path
         self.norm = norm
@@ -28,14 +33,11 @@ class PolarDataset(Dataset):
         patches = self.data_info[index].astype(np.float32)
         imgs = (patches[0], patches[1])
 
-        imgs = tuple(map(lambda img: img / 255.0, imgs))
+        imgs = tuple(map(partial(norm, mode=self.norm), imgs))
 
-        if self.norm is not None:
-            imgs = tuple(map(partial(self.norm, mode='max-min'), imgs))
-
-        if self.transform is not None:
+        if self.transform:
             idx = np.random.choice(8)
-            imgs = tuple(map(partial(self.transform, mode=idx), imgs))
+            imgs = tuple(map(partial(transform, mode=idx), imgs))
 
         imgs = tuple(
             map(lambda img: torch.from_numpy(img[None, :].copy()).float(),
@@ -63,10 +65,10 @@ if __name__ == '__main__':
 
     from torch.utils.data import DataLoader
 
-    from transform import denorm, norm, transform
+    from transform import denorm
 
     train_path = os.path.join(BASE_DIR, 'samples', 'train')
-    train_dataset = PolarDataset(train_path, norm=norm, transform=transform)
+    train_dataset = PolarDataset(train_path, norm='min-max', transform=True)
     train_loader = DataLoader(
         train_dataset,
         batch_size=1,

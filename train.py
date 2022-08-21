@@ -291,9 +291,8 @@ if __name__ == '__main__':
     loss_fn = FusionLoss(mode='msw-ssim',
                          extra_mode='l1',
                          val_range=1,
-                         size_average=True,
                          no_luminance=False)
-    eval_fn = SSIM(val_range=1, size_average=True, no_luminance=False)
+    eval_fn = SSIM(val_range=1, no_luminance=False)
 
     # 3. optimize
     optimizer = optim.Adam(model.parameters(), lr=lr, betas=betas)

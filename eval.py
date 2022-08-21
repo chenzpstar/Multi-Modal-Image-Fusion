@@ -57,14 +57,15 @@ def eval(data_loader, model, eval_fn, device):
 
         with torch.no_grad():
             pred = model(vis, dolp)
-            ssim = (eval_fn(vis, pred)['ssim'] +
-                    eval_fn(dolp, pred)['ssim']) * 0.5
+            ssim1 = eval_fn(vis, pred)['ssim'].mean()
+            ssim2 = eval_fn(dolp, pred)['ssim'].mean()
+            ssim = (ssim1 + ssim2) * 0.5
 
         eval_ssim.append(ssim.item())
         print('iter: {:0>2}, ssim: {:.3%}'.format(idx + 1, ssim.item()))
 
         # if idx % 4 == 0:
-        #     result = save_result(pred[0], eval_vis[0], eval_dolp[0])
+        #     result = save_result(pred[0], vis[0], dolp[0])
         #     file_name = '{:0>2}.png'.format(idx // 4 + 1)
         #     cv2.imwrite(os.path.join(save_path, file_name), result)
 
@@ -113,7 +114,7 @@ if __name__ == '__main__':
         raise FileNotFoundError(
             'please check your path to checkpoint file: {}'.format(ckpt_path))
 
-    eval_fn = SSIM(val_range=1, size_average=True, no_luminance=False)
+    eval_fn = SSIM(val_range=1, no_luminance=False)
 
     # 3. eval
     eval_ssim = eval(eval_loader, model, eval_fn, device)

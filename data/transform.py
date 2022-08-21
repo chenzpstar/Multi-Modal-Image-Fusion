@@ -19,7 +19,7 @@ def norm(img, mode=None):
     elif mode == 'min-max':
         img_min = img.min()
         img_max = img.max()
-        img = (img - img_min) / (img_max - img_min)
+        img = (img - img_min) / (img_max - img_min).clip(eps)
 
     elif mode == 'z-score':
         img_mean = img.mean()

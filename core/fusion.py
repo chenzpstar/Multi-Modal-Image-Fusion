@@ -10,6 +10,11 @@
 import torch
 import torch.nn.functional as F
 
+__all__ = [
+    'element_fusion', 'concat_fusion', 'attention_fusion', 'spatial_fusion',
+    'channel_fusion'
+]
+
 eps = 1e-7
 
 
@@ -103,7 +108,8 @@ def channel_pooling(tensor, mode='avg'):
 
 def _nuclear_pooling(tensor):
     channel = tensor.shape[1]
-    vectors = torch.zeros(1, channel, 1, 1).to(tensor.device)
+    vectors = torch.zeros(1, channel, 1, 1).to(tensor.device,
+                                               non_blocking=True)
 
     for i in range(channel):
         s = torch.svd(tensor[0, i].clamp(min=eps))[1]

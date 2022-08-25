@@ -59,7 +59,7 @@ def eval(data_loader, model, eval_fn, device):
             pred = model(vis, dolp)
             ssim1 = eval_fn(vis, pred)['ssim'].mean()
             ssim2 = eval_fn(dolp, pred)['ssim'].mean()
-            ssim = (ssim1 + ssim2) * 0.5
+            ssim = (ssim1 + ssim2) / 2.0
 
         eval_ssim.append(ssim.item())
         print('iter: {:0>2}, ssim: {:.3%}'.format(idx + 1, ssim.item()))

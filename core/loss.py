@@ -300,7 +300,7 @@ class FusionLoss(nn.Module):
             extra_loss = tv_fn(img1 - pred)
 
         else:
-            raise ValueError("only supported ['l1', 'l2'] mode")
+            raise ValueError("only supported ['l1', 'l2', 'tv'] mode")
 
         return loss, extra_loss
 

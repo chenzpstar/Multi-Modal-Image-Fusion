@@ -236,6 +236,58 @@ class MSW_SSIM(nn.Module):
         return ssim / len(self.window_sizes)
 
 
+class SSIMLoss(nn.Module):
+    def __init__(self, mode='ssim', val_range=None, no_luminance=False):
+        super(SSIMLoss, self).__init__()
+        self.mode = mode
+        self.val_range = val_range
+        self.no_luminance = no_luminance
+
+    def forward(self, img1, img2, pred):
+        channel = img1.shape[1]
+
+        if self.mode == 'ssim':
+            ssim_fn = SSIM(11, channel, self.val_range, self.no_luminance)
+            ssim1 = ssim_fn(img1, pred)['ssim'].mean()
+            ssim2 = ssim_fn(img2, pred)['ssim'].mean()
+            loss = 1.0 - (ssim1 + ssim2) / 2.0
+
+        elif self.mode == 'ms-ssim':
+            msssim_fn = MS_SSIM(11, channel, self.val_range, self.no_luminance)
+            msssim1 = msssim_fn(img1, pred).mean()
+            msssim2 = msssim_fn(img2, pred).mean()
+            loss = 1.0 - (msssim1 + msssim2) / 2.0
+
+        elif self.mode == 'msw-ssim':
+            mswssim_fn = MSW_SSIM((11, 9, 7, 5, 3), channel, self.val_range,
+                                  self.no_luminance)
+            loss = 1.0 - mswssim_fn(img1, img2, pred)
+
+        else:
+            raise ValueError(
+                "only supported ['ssim', 'ms-ssim', 'msw-ssim'] mode")
+
+        return loss
+
+
+class PixelLoss(nn.Module):
+    def __init__(self, mode='l1'):
+        super(PixelLoss, self).__init__()
+        self.mode = mode
+
+    def forward(self, img, pred):
+        if self.mode == 'l1':
+            loss = torch.abs(img - pred).mean()
+
+        elif self.mode == 'l2':
+            loss = torch.pow(img - pred, 2).mean()
+
+        else:
+            raise ValueError("only supported ['l1', 'l2'] mode")
+
+        return loss
+
+
 class TVLoss(nn.Module):
     def __init__(self, weight=1.0):
         super(TVLoss, self).__init__()
@@ -248,80 +300,31 @@ class TVLoss(nn.Module):
         return self.weight * (tv_h + tv_w)
 
 
-class FusionLoss(nn.Module):
-    def __init__(self,
-                 mode='ssim',
-                 extra_mode=None,
-                 val_range=None,
-                 no_luminance=False):
-        super(FusionLoss, self).__init__()
-        self.mode = mode
-        self.extra_mode = extra_mode
-        self.val_range = val_range
-        self.no_luminance = no_luminance
-
-    def forward(self, img1, img2, pred):
-        channel = img1.shape[1]
-
-        if self.mode == 'ssim':
-            ssim_fn = SSIM(11, channel, self.val_range, self.no_luminance)
-            ssim1 = ssim_fn(img1, pred)['ssim'].mean()
-            ssim2 = ssim_fn(img2, pred)['ssim'].mean()
-            loss = 1.0 - (ssim1 + ssim2) * 0.5
-
-        elif self.mode == 'ms-ssim':
-            msssim_fn = MS_SSIM(11, channel, self.val_range, self.no_luminance)
-            msssim1 = msssim_fn(img1, pred).mean()
-            msssim2 = msssim_fn(img2, pred).mean()
-            loss = 1.0 - (msssim1 + msssim2) * 0.5
-
-        elif self.mode == 'msw-ssim':
-            mswssim_fn = MSW_SSIM((11, 9, 7, 5, 3), channel, self.val_range,
-                                  self.no_luminance)
-            loss = 1.0 - mswssim_fn(img1, img2, pred)
-
-        else:
-            raise ValueError(
-                "only supported ['ssim', 'ms-ssim', 'msw-ssim'] mode")
-
-        if self.extra_mode is None:
-            extra_loss = 0.0
-
-        elif self.extra_mode == 'l1':
-            avg = (img1 + img2) / 2.0
-            extra_loss = torch.abs(avg - pred).mean()
-
-        elif self.extra_mode == 'l2':
-            avg = (img1 + img2) / 2.0
-            extra_loss = torch.pow(avg - pred, 2).mean()
-
-        elif self.extra_mode == 'tv':
-            tv_fn = TVLoss()
-            extra_loss = tv_fn(img1 - pred)
-
-        else:
-            raise ValueError("only supported ['l1', 'l2', 'tv'] mode")
-
-        return loss, extra_loss
-
-
 if __name__ == '__main__':
 
     import torch
 
     torch.manual_seed(0)
 
-    mode = ['ssim', 'ms-ssim', 'msw-ssim']
-    extra_mode = ['l1', 'l2', 'tv']
+    ssim_mode = ['ssim', 'ms-ssim', 'msw-ssim']
+    pixel_mode = ['l1', 'l2']
 
-    model = FusionLoss(mode[2], extra_mode[0], val_range=1, no_luminance=False)
+    loss_fn1 = SSIMLoss(ssim_mode[2], val_range=1, no_luminance=False)
+    loss_fn2 = PixelLoss(pixel_mode[0])
+    loss_fn3 = TVLoss()
 
     x1 = torch.rand(2, 1, 224, 224)
     x2 = torch.rand(2, 1, 224, 224)
     y = torch.rand(2, 1, 224, 224)
 
-    loss1, loss2 = model(x1, x2, y)
-    print(loss1.item()), print(loss2.item())
+    loss1 = loss_fn1(x1, x2, y)
+    print(loss1.item())
+
+    loss2 = loss_fn2((x1 + x2) / 2.0, y)
+    print(loss2.item())
+
+    loss3 = loss_fn3(x1 - y)
+    print(loss3.item())
 
     total_loss = loss1 + loss2 * 0.1
     print(total_loss.item())

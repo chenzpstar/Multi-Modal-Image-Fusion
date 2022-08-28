@@ -45,9 +45,9 @@ def eval(data_loader, model, eval_fn, device):
 
     model.eval()
 
-    # save_path = os.path.join(ckpt_dir, 'eval')
-    # if not os.path.isdir(save_path):
-    #     os.makedirs(save_path)
+    save_path = os.path.join(ckpt_dir, 'eval')
+    if not os.path.isdir(save_path):
+        os.makedirs(save_path)
 
     eval_ssim = []
 
@@ -59,15 +59,16 @@ def eval(data_loader, model, eval_fn, device):
             pred = model(vis, dolp)
             ssim1 = eval_fn(vis, pred)['ssim'].mean()
             ssim2 = eval_fn(dolp, pred)['ssim'].mean()
-            ssim = (ssim1 + ssim2) / 2.0
+            avg_ssim = (ssim1 + ssim2) / 2.0
 
-        eval_ssim.append(ssim.item())
-        print('iter: {:0>2}, ssim: {:.3%}'.format(idx + 1, ssim.item()))
+        eval_ssim.append(avg_ssim.item())
+        print('iter: {:0>2}, eval ssim: {:.3%}'.format(idx + 1,
+                                                       avg_ssim.item()))
 
-        # if idx % 4 == 0:
-        #     result = save_result(pred[0], vis[0], dolp[0])
-        #     file_name = '{:0>2}.png'.format(idx // 4 + 1)
-        #     cv2.imwrite(os.path.join(save_path, file_name), result)
+        if idx % 4 == 0:
+            result = save_result(pred[0], vis[0], dolp[0])
+            file_name = '{:0>2}.png'.format(idx // 4 + 1)
+            cv2.imwrite(os.path.join(save_path, file_name), result)
 
     if torch.cuda.is_available():
         torch.cuda.synchronize()

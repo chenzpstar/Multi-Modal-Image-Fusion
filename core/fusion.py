@@ -12,7 +12,7 @@ import torch.nn.functional as F
 
 __all__ = [
     'element_fusion', 'weighted_fusion', 'concat_fusion', 'attention_fusion',
-    'spatial_fusion', 'channel_fusion'
+    'spatial_fusion', 'channel_fusion', 'spatial_pooling', 'channel_pooling'
 ]
 
 eps = 1e-7
@@ -35,8 +35,8 @@ def weighted_fusion(tensor1, tensor2, w1, w2):
     return w * tensor1 + (1.0 - w) * tensor2
 
 
-def concat_fusion(tensor1, tensor2, dim=1):
-    return torch.cat((tensor1, tensor2), dim)
+def concat_fusion(tensors, dim=1):
+    return torch.cat(tensors, dim)
 
 
 def attention_fusion(tensor1,

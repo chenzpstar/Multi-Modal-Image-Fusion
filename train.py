@@ -30,11 +30,10 @@ from torch.utils.data import DataLoader, DistributedSampler
 from torch.utils.tensorboard import SummaryWriter
 
 from common import *
-from core.loss import SSIM, FusionLoss
+from core.loss import PixelLoss, SSIMLoss
 from core.model import *
 from data.dataset import PolarDataset as Dataset
 from data.patches import PolarDataset as Patches
-from eval import eval
 
 
 def get_args():
@@ -62,7 +61,7 @@ def get_args():
     return parser.parse_args()
 
 
-def train(data_loader, model, loss_fn, optimizer, device, epoch):
+def train(data_loader, model, loss_fn1, loss_fn2, optimizer, device, epoch):
     if torch.cuda.is_available():
         torch.cuda.synchronize(device)
     start_time = time.time()
@@ -83,7 +82,8 @@ def train(data_loader, model, loss_fn, optimizer, device, epoch):
         optimizer.zero_grad()
 
         pred = model(vis, dolp)
-        loss1, loss2 = loss_fn(vis, dolp, pred)
+        loss1 = loss_fn1(vis, dolp, pred)
+        loss2 = loss_fn2((vis + dolp) / 2.0, pred)
         total_loss = loss1 + loss2 * 0.1
 
         total_loss.backward()
@@ -141,7 +141,7 @@ def train(data_loader, model, loss_fn, optimizer, device, epoch):
     return np.mean(train_loss)
 
 
-def valid(data_loader, model, loss_fn, device, epoch):
+def valid(data_loader, model, loss_fn1, loss_fn2, device, epoch):
     if torch.cuda.is_available():
         torch.cuda.synchronize(device)
     start_time = time.time()
@@ -161,7 +161,8 @@ def valid(data_loader, model, loss_fn, device, epoch):
 
         with torch.no_grad():
             pred = model(vis, dolp)
-            loss1, loss2 = loss_fn(vis, dolp, pred)
+            loss1 = loss_fn1(vis, dolp, pred)
+            loss2 = loss_fn2((vis + dolp) / 2.0, pred)
             total_loss = loss1 + loss2 * 0.1
 
         if is_distributed:
@@ -239,9 +240,10 @@ if __name__ == '__main__':
     train_path = os.path.join(BASE_DIR, '..', 'data', 'train')
     valid_path = os.path.join(BASE_DIR, '..', 'data', 'valid')
 
+    # train_dataset = Dataset(train_path, transform=True)
+    # valid_dataset = Dataset(valid_path)
     train_dataset = Patches(train_path, transform=True)
     valid_dataset = Patches(valid_path)
-    eval_dataset = Dataset(valid_path)
 
     if is_distributed:
         train_sampler = DistributedSampler(train_dataset, shuffle=True)
@@ -263,13 +265,6 @@ if __name__ == '__main__':
         num_workers=4 * args.local_world_size,
         pin_memory=True,
     )
-    eval_loader = DataLoader(
-        eval_dataset,
-        batch_size=1,
-        shuffle=False,
-        num_workers=4,
-        pin_memory=True,
-    )
 
     # 2. model
     model = PFNetv1().to(device, non_blocking=True)
@@ -288,11 +283,8 @@ if __name__ == '__main__':
         model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
         model = DDP(model, device_ids=[local_rank])
 
-    loss_fn = FusionLoss(mode='msw-ssim',
-                         extra_mode='l1',
-                         val_range=1,
-                         no_luminance=False)
-    eval_fn = SSIM(val_range=1, no_luminance=False)
+    loss_fn1 = SSIMLoss(mode='msw-ssim', val_range=1, no_luminance=False)
+    loss_fn2 = PixelLoss(mode='l1')
 
     # 3. optimize
     optimizer = optim.Adam(model.parameters(), lr=lr, betas=betas)
@@ -315,8 +307,8 @@ if __name__ == '__main__':
         if is_distributed:
             train_sampler.set_epoch(epoch)
 
-        train_loss = train(train_loader, model, loss_fn, optimizer, device,
-                           epoch)
+        train_loss = train(train_loader, model, loss_fn1, loss_fn2, optimizer,
+                           device, epoch)
 
         if local_rank == 0:
             writer.add_scalar('train_loss_epoch',
@@ -325,7 +317,8 @@ if __name__ == '__main__':
             print('epoch: {:0>2}, train loss: {:.4f}\n'.format(
                 epoch_idx, train_loss))
 
-        valid_loss = valid(valid_loader, model, loss_fn, device, epoch)
+        valid_loss = valid(valid_loader, model, loss_fn1, loss_fn2, device,
+                           epoch)
 
         if local_rank == 0:
             writer.add_scalar('valid_loss_epoch',
@@ -337,13 +330,6 @@ if __name__ == '__main__':
         scheduler1.step()
 
         if local_rank == 0:
-            eval_ssim = eval(eval_loader, model, eval_fn, device)
-            writer.add_scalar('eval_ssim_epoch', eval_ssim, global_step=epoch)
-            print('epoch: {:0>2}, eval ssim: {:.3%}\n'.format(
-                epoch_idx, eval_ssim))
-
-            # if eval_ssim > best_ssim:
-            #     best_epoch, best_ssim = epoch_idx, eval_ssim
             if valid_loss < best_loss:
                 best_epoch, best_loss = epoch_idx, valid_loss
                 ckpt_path = os.path.join(ckpt_dir, 'epoch_best.pth')

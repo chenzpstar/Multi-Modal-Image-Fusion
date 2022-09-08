@@ -245,7 +245,7 @@ class DBNet(_FusionModel):
 
 
 class SEDRFuse(nn.Module):
-    '''SEDRFuse: A Symmetric Encoder-Decoder With Residual Block Network for Infrared and Visible Image Fusion'''
+    '''SEDRFuse: A Symmetric Encoder-Decoder with Residual Block Network for Infrared and Visible Image Fusion'''
     def __init__(self):
         super(SEDRFuse, self).__init__()
         self.encode = nn.ModuleList([
@@ -452,7 +452,7 @@ class IFCNN(_FusionModel):
 
 
 class DIFNet(_FusionModel):
-    '''Unsupervised Deep Image Fusion With Structure Tensor Representations'''
+    '''Unsupervised Deep Image Fusion with Structure Tensor Representations'''
     def __init__(self):
         super(DIFNet, self).__init__()
         self.encode = nn.Sequential(
@@ -476,6 +476,7 @@ class DIFNet(_FusionModel):
 
 
 class PMGI(nn.Module):
+    '''Rethinking the Image Fusion: A Fast Unified Image Fusion Network Based on Proportional Maintenance of Gradient and Intensity'''
     def __init__(self):
         super(PMGI, self).__init__()
         self.gradient = nn.ModuleList([

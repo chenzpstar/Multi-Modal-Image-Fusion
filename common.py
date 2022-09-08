@@ -48,16 +48,34 @@ def setup_dist(rank=0, world_size=1):
 
 
 def reduce_value(value, world_size=1, average=True):
-    if world_size == 1:
-        return value
-
     with torch.no_grad():
-        dist.all_reduce(value)
+        if world_size > 1:
+            dist.all_reduce(value)
 
-        if average:
-            value /= world_size
+            if average:
+                value /= world_size
 
     return value
+
+
+class AverageMeter(object):
+    def __init__(self):
+        self.reset()
+
+    def is_empty(self):
+        return self.count == 0
+
+    def reset(self):
+        self.val = 0
+        self.avg = 0
+        self.sum = 0
+        self.count = 0
+
+    def update(self, val, n=1):
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count
 
 
 class WarmupLR(_LRScheduler):

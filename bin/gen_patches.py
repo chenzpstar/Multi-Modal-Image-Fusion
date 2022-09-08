@@ -13,15 +13,15 @@ import cv2
 import numpy as np
 
 
-def count_patches(root_path, patch_size, stride):
+def count_patches(data_dir, patch_size, stride):
     count = 0
-    vis_dir = os.path.join(root_path, 'vis')
+    img_dir = os.path.join(data_dir, 'vis')
 
-    for img in os.listdir(vis_dir):
-        vis_path = os.path.join(vis_dir, img)
-        vis_img = cv2.imread(vis_path, cv2.IMREAD_GRAYSCALE)
+    for img in os.listdir(img_dir):
+        img_path1 = os.path.join(img_dir, img)
+        img1 = cv2.imread(img_path1, cv2.IMREAD_GRAYSCALE)
 
-        h, w = vis_img.shape
+        h, w = img1.shape
 
         # h_start = (h - patch_size) % stride // 2
         h_start = stride // 2
@@ -38,21 +38,21 @@ def count_patches(root_path, patch_size, stride):
     return count
 
 
-def gen_patches(root_path, num_patches, patch_size, stride):
+def gen_patches(data_dir, num_patches, patch_size, stride):
     count = 0
-    vis_dir = os.path.join(root_path, 'vis')
+    img_dir = os.path.join(data_dir, 'vis')
 
     patches = np.zeros((num_patches, 2, patch_size, patch_size),
                        dtype=np.uint8)
 
-    for img in os.listdir(vis_dir):
-        vis_path = os.path.join(vis_dir, img)
-        vis_img = cv2.imread(vis_path, cv2.IMREAD_GRAYSCALE)
+    for img in os.listdir(img_dir):
+        img_path1 = os.path.join(img_dir, img)
+        img1 = cv2.imread(img_path1, cv2.IMREAD_GRAYSCALE)
 
-        dolp_path = vis_path.replace('vis', 'dolp')
-        dolp_img = cv2.imread(dolp_path, cv2.IMREAD_GRAYSCALE)
+        img_path2 = img_path1.replace('vis', 'dolp')
+        img2 = cv2.imread(img_path2, cv2.IMREAD_GRAYSCALE)
 
-        h, w = vis_img.shape
+        h, w = img1.shape
 
         # h_start = (h - patch_size) % stride // 2
         h_start = stride // 2
@@ -64,9 +64,8 @@ def gen_patches(root_path, num_patches, patch_size, stride):
 
         for y in range(h_start, h - h_end + 1, stride):
             for x in range(w_start, w - w_end + 1, stride):
-                patches[count, 0] = vis_img[y:y + patch_size, x:x + patch_size]
-                patches[count, 1] = dolp_img[y:y + patch_size,
-                                             x:x + patch_size]
+                patches[count, 0] = img1[y:y + patch_size, x:x + patch_size]
+                patches[count, 1] = img2[y:y + patch_size, x:x + patch_size]
                 count += 1
 
     return patches
@@ -81,15 +80,17 @@ if __name__ == '__main__':
     sys.path.append(os.path.join(BASE_DIR, '..'))
 
     # 0. config
-    root_path = os.path.join(BASE_DIR, '..', '..', 'data', 'train')
-    # root_path = os.path.join(BASE_DIR, '..', '..', 'data', 'valid')
-
     patch_size = 224
     stride = 100
     batch_size = 16
+    data_name = 'polar'
+
+    root_dir = os.path.join(BASE_DIR, '..', '..', 'datasets', data_name)
+    data_dir = os.path.join(root_dir, 'train')
+    # data_dir = os.path.join(root_dir, 'valid')
 
     # 1. count patches
-    count = count_patches(root_path, patch_size, stride)
+    count = count_patches(data_dir, patch_size, stride)
 
     num_patches = int(np.ceil(count / batch_size)) * batch_size
 
@@ -97,7 +98,7 @@ if __name__ == '__main__':
         num_patches, batch_size, num_patches // batch_size))
 
     # 2. generate patches
-    patches = gen_patches(root_path, num_patches, patch_size, stride)
+    patches = gen_patches(data_dir, num_patches, patch_size, stride)
 
     if count < num_patches:
         pad = num_patches - count
@@ -108,10 +109,9 @@ if __name__ == '__main__':
         len(patches) // batch_size))
 
     # 3. save patches
-    save_path = os.path.join(root_path, 'patches')
-    if not os.path.isdir(save_path):
-        os.makedirs(save_path)
+    save_dir = os.path.join(data_dir, 'patches')
+    if not os.path.isdir(save_dir):
+        os.makedirs(save_dir)
 
-    np.save(os.path.join(save_path, 'patch_{}.npy'.format(patch_size)),
-            patches)
+    np.save(os.path.join(save_dir, 'patch_{}.npy'.format(patch_size)), patches)
     print('saving patches successfully')

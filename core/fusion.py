@@ -26,7 +26,7 @@ def element_fusion(tensor1, tensor2, mode='sum'):
     elif mode == 'max':
         return torch.max(tensor1, tensor2)
     else:
-        raise ValueError("only supported ['add', 'mean', 'max'] mode")
+        raise ValueError("only supported ['sum', 'mean', 'max'] mode")
 
 
 def weighted_fusion(tensor1, tensor2, w1, w2):

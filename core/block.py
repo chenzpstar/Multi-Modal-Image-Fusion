@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-# @file name  : model.py
+# @file name  : block.py
 # @author     : chenzhanpeng https://github.com/chenzpstar
 # @date       : 2022-07-26
 # @brief      : 网络模块类

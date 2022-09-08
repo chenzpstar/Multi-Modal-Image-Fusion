@@ -20,10 +20,11 @@ except:
     from transform import norm, transform
 
 
-class PolarDataset(Dataset):
-    def __init__(self, root_path, norm=None, transform=False):
-        super(PolarDataset, self).__init__()
-        self.root_path = root_path
+class FusionPatches(Dataset):
+    def __init__(self, root_dir, set_name, norm=None, transform=False):
+        super(FusionPatches, self).__init__()
+        self.root_dir = root_dir
+        self.set_name = set_name
         self.norm = norm
         self.transform = transform
         self.data_info = None
@@ -50,7 +51,8 @@ class PolarDataset(Dataset):
         return len(self.data_info)
 
     def _get_data_info(self):
-        patch_path = os.path.join(self.root_path, 'patches', 'patch_224.npy')
+        patch_dir = os.path.join(self.root_dir, self.set_name, 'patches')
+        patch_path = os.path.join(patch_dir, 'patch_224.npy')
         self.data_info = np.load(patch_path)
         np.random.shuffle(self.data_info)
 
@@ -67,10 +69,13 @@ if __name__ == '__main__':
 
     from transform import denorm
 
-    train_path = os.path.join(BASE_DIR, 'samples', 'train')
-    train_dataset = PolarDataset(train_path, norm='min-max', transform=True)
+    train_path = os.path.join(BASE_DIR, 'samples')
+    train_set = FusionPatches(train_path,
+                              'train',
+                              norm='min-max',
+                              transform=True)
     train_loader = DataLoader(
-        train_dataset,
+        train_set,
         batch_size=1,
         shuffle=True,
         num_workers=0,

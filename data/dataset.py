@@ -21,10 +21,16 @@ except:
     from transform import norm, transform
 
 
-class PolarDataset(Dataset):
-    def __init__(self, root_path, mode='dolp', norm=None, transform=False):
-        super(PolarDataset, self).__init__()
-        self.root_path = root_path
+class FusionDataset(Dataset):
+    def __init__(self,
+                 root_dir,
+                 set_name,
+                 mode='dolp',
+                 norm=None,
+                 transform=False):
+        super(FusionDataset, self).__init__()
+        self.root_dir = root_dir
+        self.set_name = set_name
         self.mode = mode
         self.norm = norm
         self.transform = transform
@@ -32,35 +38,10 @@ class PolarDataset(Dataset):
         self._get_data_info()
 
     def __getitem__(self, index):
-        vis_path, po_path = self.data_info[index]
-        vis_img = cv2.imread(vis_path, cv2.IMREAD_GRAYSCALE)
-        po_img = cv2.imread(po_path, cv2.IMREAD_GRAYSCALE)
-
-        if self.mode == 'dolp':
-            vis = vis_img.astype(np.float32)
-            po = po_img.astype(np.float32)
-            imgs = (vis, po)
-
-        elif self.mode == 'po':
-            h, w = po_img.shape
-            half_h, half_w = h // 2, w // 2
-
-            vis = cv2.resize(vis_img, (half_w, half_h))
-
-            po_90 = po_img[:half_h, :half_w].astype(np.float32)
-            po_45 = po_img[:half_h, half_w:].astype(np.float32)
-            po_135 = po_img[half_h:, :half_w].astype(np.float32)
-            po_0 = po_img[half_h:, half_w:].astype(np.float32)
-
-            s0 = (po_0 + po_45 + po_90 + po_135) / 2.0
-            s1 = po_0 - po_90
-            s2 = po_45 - po_135
-            dolp = np.sqrt(s1**2 + s2**2) / np.maximum(s0, 1e-7)
-
-            imgs = (vis, dolp)
-
-        else:
-            raise ValueError("only supported ['dolp', 'po'] mode")
+        img_path1, img_path2 = self.data_info[index]
+        img1 = cv2.imread(img_path1, cv2.IMREAD_GRAYSCALE).astype(np.float32)
+        img2 = cv2.imread(img_path2, cv2.IMREAD_GRAYSCALE).astype(np.float32)
+        imgs = (img1, img2)
 
         imgs = tuple(map(partial(norm, mode=self.norm), imgs))
 
@@ -79,17 +60,17 @@ class PolarDataset(Dataset):
         return len(self.data_info)
 
     def _get_data_info(self):
-        vis_dir = os.path.join(self.root_path, 'vis')
+        img_dir = os.path.join(self.root_dir, self.set_name, 'vis')
 
-        for img in os.listdir(vis_dir):
-            if img.endswith('.bmp') or img.endswith('.jpeg'):
-                vis_path = os.path.join(vis_dir, img)
+        for img in os.listdir(img_dir):
+            if img.endswith('.bmp') or img.endswith('.jpg'):
+                img_path1 = os.path.join(img_dir, img)
 
-                assert self.mode in ['dolp', 'po']
-                po_path = vis_path.replace('vis', self.mode)
+                assert self.mode in ['dolp', 'ir']
+                img_path2 = img_path1.replace('vis', self.mode)
 
-                if os.path.isfile(po_path):
-                    self.data_info.append((vis_path, po_path))
+                if os.path.isfile(img_path2):
+                    self.data_info.append((img_path1, img_path2))
 
         random.shuffle(self.data_info)
 
@@ -106,10 +87,13 @@ if __name__ == '__main__':
 
     from transform import denorm
 
-    train_path = os.path.join(BASE_DIR, 'samples', 'train')
-    train_dataset = PolarDataset(train_path, norm='min-max', transform=True)
+    train_path = os.path.join(BASE_DIR, 'samples')
+    train_set = FusionDataset(train_path,
+                              'train',
+                              norm='min-max',
+                              transform=True)
     train_loader = DataLoader(
-        train_dataset,
+        train_set,
         batch_size=1,
         shuffle=True,
         num_workers=0,

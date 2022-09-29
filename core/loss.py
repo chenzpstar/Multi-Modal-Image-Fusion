@@ -237,11 +237,16 @@ class MSW_SSIM(nn.Module):
 
 
 class SSIMLoss(nn.Module):
-    def __init__(self, mode='ssim', val_range=None, no_luminance=False):
+    def __init__(self,
+                 mode='ssim',
+                 val_range=None,
+                 no_luminance=False,
+                 weight=1.0):
         super(SSIMLoss, self).__init__()
         self.mode = mode
         self.val_range = val_range
         self.no_luminance = no_luminance
+        self.weight = weight
 
     def forward(self, img1, img2, pred):
         channel = img1.shape[1]
@@ -267,13 +272,14 @@ class SSIMLoss(nn.Module):
             raise ValueError(
                 "only supported ['ssim', 'ms-ssim', 'msw-ssim'] mode")
 
-        return loss
+        return self.weight * loss
 
 
 class PixelLoss(nn.Module):
-    def __init__(self, mode='l1'):
+    def __init__(self, mode='l1', weight=1.0):
         super(PixelLoss, self).__init__()
         self.mode = mode
+        self.weight = weight
 
     def forward(self, img, pred):
         if self.mode == 'l1':
@@ -285,17 +291,26 @@ class PixelLoss(nn.Module):
         else:
             raise ValueError("only supported ['l1', 'l2'] mode")
 
-        return loss
+        return self.weight * loss
 
 
 class TVLoss(nn.Module):
-    def __init__(self, weight=1.0):
+    def __init__(self, mode='l1', weight=1.0):
         super(TVLoss, self).__init__()
+        self.mode = mode
         self.weight = weight
 
     def forward(self, x):
-        tv_h = torch.pow(x[:, :, 1:, :] - x[:, :, :-1, :], 2).mean()
-        tv_w = torch.pow(x[:, :, :, 1:] - x[:, :, :, :-1], 2).mean()
+        if self.mode == 'l1':
+            tv_h = torch.abs(x[:, :, 1:, :] - x[:, :, :-1, :]).mean()
+            tv_w = torch.abs(x[:, :, :, 1:] - x[:, :, :, :-1]).mean()
+
+        elif self.mode == 'l2':
+            tv_h = torch.pow(x[:, :, 1:, :] - x[:, :, :-1, :], 2).mean()
+            tv_w = torch.pow(x[:, :, :, 1:] - x[:, :, :, :-1], 2).mean()
+
+        else:
+            raise ValueError("only supported ['l1', 'l2'] mode")
 
         return self.weight * (tv_h + tv_w)
 
@@ -308,10 +323,11 @@ if __name__ == '__main__':
 
     ssim_mode = ['ssim', 'ms-ssim', 'msw-ssim']
     pixel_mode = ['l1', 'l2']
+    tv_mode = ['l1', 'l2']
 
     loss_fn1 = SSIMLoss(ssim_mode[2], val_range=1, no_luminance=False)
-    loss_fn2 = PixelLoss(pixel_mode[0])
-    loss_fn3 = TVLoss()
+    loss_fn2 = PixelLoss(pixel_mode[0], weight=0.1)
+    loss_fn3 = TVLoss(tv_mode[0])
 
     x1 = torch.rand(2, 1, 224, 224)
     x2 = torch.rand(2, 1, 224, 224)
@@ -326,5 +342,5 @@ if __name__ == '__main__':
     loss3 = loss_fn3(x1 - y)
     print(loss3.item())
 
-    total_loss = loss1 + loss2 * 0.1
+    total_loss = loss1 + loss2
     print(total_loss.item())

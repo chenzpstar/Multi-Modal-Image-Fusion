@@ -99,7 +99,7 @@ def train_model(model,
             pred = model(img1, img2)
             loss1 = loss_fn1(img1, img2, pred)
             loss2 = loss_fn2((img1 + img2) / 2.0, pred)
-            total_loss = loss1 + loss2 * 0.1
+            total_loss = loss1 + loss2
 
             total_loss.backward()
             if args.clip_grad:
@@ -117,7 +117,7 @@ def train_model(model,
                 pred = model(img1, img2)
                 loss1 = loss_fn1(img1, img2, pred)
                 loss2 = loss_fn2((img1 + img2) / 2.0, pred)
-                total_loss = loss1 + loss2 * 0.1
+                total_loss = loss1 + loss2
 
         if is_distributed:
             total_loss = reduce_value(total_loss, args.local_world_size)
@@ -138,18 +138,16 @@ def train_model(model,
                                   global_step)
 
             if iter_idx % 10 == 0:
-                print(
-                    'epoch: {:0>2}, iter: {:0>3}, {} loss: {:.4f}, lr: {:.2e}'.
-                    format(epoch_idx, iter_idx, mode, loss.avg,
-                           optimizer.param_groups[0]['lr']))
+                print('epoch: {:0>2}, iter: {:0>3}, {} loss: {:.4f}'.format(
+                    epoch_idx, iter_idx, mode, loss.avg))
 
     if torch.cuda.is_available():
         torch.cuda.synchronize(device)
     cost_time = time.time() - start_time
 
     if local_rank == 0:
-        print('\ncost time: {:.0f}m:{:.0f}s'.format(cost_time // 60,
-                                                    cost_time % 60))
+        print('\ncost time: {:.0f}m:{:.0f}s\n'.format(cost_time // 60,
+                                                      cost_time % 60))
 
         if save_dir is not None:
             stride = len(pred) // 4 if len(pred) > 8 else len(pred) // 2
@@ -260,7 +258,7 @@ if __name__ == '__main__':
 
     # 3. optimize
     loss_fn1 = SSIMLoss(mode='msw-ssim', val_range=1, no_luminance=False)
-    loss_fn2 = PixelLoss(mode='l1')
+    loss_fn2 = PixelLoss(mode='l1', weight=0.1)
 
     optimizer = optim.Adam(model.parameters(), lr=lr, betas=betas)
 
@@ -276,7 +274,8 @@ if __name__ == '__main__':
         epoch_idx = epoch + 1
 
         if local_rank == 0:
-            print('Epoch: [{:0>2}/{:0>2}]'.format(epoch_idx, num_epochs))
+            print('Epoch: [{:0>2}/{:0>2}], lr: {:.2e}'.format(
+                epoch_idx, num_epochs, optimizer.param_groups[0]['lr']))
             print('-' * 16)
 
         if is_distributed:
@@ -288,26 +287,22 @@ if __name__ == '__main__':
                                  epoch, writer, device, 'train', optimizer,
                                  train_save_dir)
 
-        if local_rank == 0:
-            writer.add_scalar('train_loss_epoch', train_loss, epoch)
-            print('epoch: {:0>2}, train loss: {:.4f}\n'.format(
-                epoch_idx, train_loss))
-
         # 2. valid
         model.eval()
         valid_loss = train_model(model, valid_loader, loss_fn1, loss_fn2,
                                  epoch, writer, device, 'valid',
                                  valid_save_dir)
 
-        if local_rank == 0:
-            writer.add_scalar('valid_loss_epoch', valid_loss, epoch)
-            print('epoch: {:0>2}, valid loss: {:.4f}\n'.format(
-                epoch_idx, valid_loss))
-
         # 3. update lr
         scheduler1.step()
 
         if local_rank == 0:
+            writer.add_scalar('train_loss_epoch', train_loss, epoch)
+            writer.add_scalar('valid_loss_epoch', valid_loss, epoch)
+
+            print('epoch: {:0>2}, train loss: {:.4f}, valid loss: {:.4f}\n'.
+                  format(epoch_idx, train_loss, valid_loss))
+
             if valid_loss < best_loss or epoch == 0:
                 best_epoch, best_loss = epoch_idx, valid_loss
                 ckpt_path = os.path.join(ckpt_dir, 'epoch_best.pth')

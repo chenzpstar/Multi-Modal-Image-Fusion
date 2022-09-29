@@ -149,13 +149,13 @@ class DeepFuse(_FusionModel):
     def __init__(self):
         super(DeepFuse, self).__init__()
         self.encode = nn.Sequential(
-            ConvBlock(1, 16, kernel_size=5),
-            ConvBlock(16, 32, kernel_size=7),
+            ConvBlock(1, 16, ksize=5),
+            ConvBlock(16, 32, ksize=7),
         )
         self.decode = nn.Sequential(
-            ConvBlock(32, 32, kernel_size=7),
-            ConvBlock(32, 16, kernel_size=5),
-            ConvBlock(16, 1, kernel_size=5, act=None),
+            ConvBlock(32, 32, ksize=7),
+            ConvBlock(32, 16, ksize=5),
+            ConvBlock(16, 1, ksize=5, act=None),
         )
 
     def fusion(self, feat1, feat2, mode='sum'):
@@ -324,7 +324,7 @@ class NestFuse(_FusionModel):
         num_ch = [64, 112, 160, 208]
 
         # encoder
-        self.conv_in = ConvBlock(1, 16, kernel_size=1)
+        self.conv_in = ConvBlock(1, 16, ksize=1)
         self.CB1_0 = CB(16, num_ch[0])
         self.CB2_0 = CB(num_ch[0], num_ch[1])
         self.CB3_0 = CB(num_ch[1], num_ch[2])
@@ -439,12 +439,12 @@ class IFCNN(_FusionModel):
     def __init__(self):
         super(IFCNN, self).__init__()
         self.encode = nn.Sequential(
-            ConvBlock(1, 64, kernel_size=7, act=None),
+            ConvBlock(1, 64, ksize=7, act=None),
             ConvBlock(64, 64, norm='bn'),
         )
         self.decode = nn.Sequential(
             ConvBlock(64, 64, norm='bn'),
-            ConvBlock(64, 1, kernel_size=1, act=None),
+            ConvBlock(64, 1, ksize=1, act=None),
         )
 
     def fusion(self, feat1, feat2, mode='max'):
@@ -480,29 +480,26 @@ class PMGI(nn.Module):
     def __init__(self):
         super(PMGI, self).__init__()
         self.gradient = nn.ModuleList([
-            ConvBlock(3, 16, kernel_size=5, norm='bn', act='lrelu'),
+            ConvBlock(3, 16, ksize=5, norm='bn', act='lrelu'),
             ConvBlock(16, 16, norm='bn', act='lrelu'),
             ConvBlock(48, 16, norm='bn', act='lrelu'),
             ConvBlock(64, 16, norm='bn', act='lrelu'),
         ])
         self.intensity = nn.ModuleList([
-            ConvBlock(3, 16, kernel_size=5, norm='bn', act='lrelu'),
+            ConvBlock(3, 16, ksize=5, norm='bn', act='lrelu'),
             ConvBlock(16, 16, norm='bn', act='lrelu'),
             ConvBlock(48, 16, norm='bn', act='lrelu'),
             ConvBlock(64, 16, norm='bn', act='lrelu'),
         ])
         self.transfer1 = nn.ModuleList([
-            ConvBlock(32, 16, kernel_size=1, norm='bn', act='lrelu'),
-            ConvBlock(32, 16, kernel_size=1, norm='bn', act='lrelu'),
+            ConvBlock(32, 16, ksize=1, norm='bn', act='lrelu'),
+            ConvBlock(32, 16, ksize=1, norm='bn', act='lrelu'),
         ])
         self.transfer2 = nn.ModuleList([
-            ConvBlock(32, 16, kernel_size=1, norm='bn', act='lrelu'),
-            ConvBlock(32, 16, kernel_size=1, norm='bn', act='lrelu'),
+            ConvBlock(32, 16, ksize=1, norm='bn', act='lrelu'),
+            ConvBlock(32, 16, ksize=1, norm='bn', act='lrelu'),
         ])
-        self.decode = nn.Sequential(
-            ConvBlock(128, 1, kernel_size=1, act=None),
-            nn.Tanh(),
-        )
+        self.decode = ConvBlock(128, 1, ksize=1, act='tanh')
 
     def encoder(self, img1, img2):
         x1 = concat_fusion((img1, img1, img2))

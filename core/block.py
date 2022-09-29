@@ -23,23 +23,25 @@ class ConvBlock(nn.Module):
     def __init__(self,
                  in_ch,
                  out_ch,
-                 kernel_size=3,
+                 ksize=3,
                  stride=1,
                  dilation=1,
                  groups=1,
                  norm=None,
-                 act='relu'):
+                 act='relu',
+                 padding_mode='zeros'):
         super(ConvBlock, self).__init__()
-        padding = 1 if kernel_size == 3 else kernel_size // 2
+        padding = 1 if ksize == 3 else ksize // 2
         layers = [
             nn.Conv2d(in_ch,
                       out_ch,
-                      kernel_size,
+                      ksize,
                       stride,
                       padding,
                       dilation,
                       groups,
-                      bias=(norm != 'bn'))
+                      bias=(norm != 'bn'),
+                      padding_mode=padding_mode)
         ]
 
         if norm == 'bn':
@@ -51,6 +53,8 @@ class ConvBlock(nn.Module):
             layers.append(nn.ReLU(inplace=True))
         elif act == 'lrelu':
             layers.append(nn.LeakyReLU(0.2, inplace=True))
+        elif act == 'tanh':
+            layers.append(nn.Tanh())
 
         self.conv = nn.Sequential(*layers)
         self.norm = norm
@@ -64,14 +68,17 @@ class ConvBlock(nn.Module):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 if self.act == 'relu':
-                    a = 0
+                    nn.init.kaiming_normal_(m.weight)
                 elif self.act == 'lrelu':
-                    a = 0.2
+                    nn.init.kaiming_normal_(m.weight, a=0.2)
+                elif self.act == 'tanh':
+                    nn.init.kaiming_normal_(m.weight, nonlinearity='tanh')
                 else:
-                    a = 1
-                nn.init.kaiming_normal_(m.weight, a, mode='fan_out')
+                    nn.init.kaiming_normal_(m.weight, nonlinearity='linear')
+
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
+
             elif isinstance(m, nn.BatchNorm2d):
                 nn.init.ones_(m.weight)
                 nn.init.zeros_(m.bias)
@@ -81,21 +88,23 @@ class DeconvBlock(nn.Module):
     def __init__(self,
                  in_ch,
                  out_ch,
-                 kernel_size=3,
+                 ksize=3,
                  stride=1,
                  output_padding=0,
                  norm=None,
-                 act='relu'):
+                 act='relu',
+                 padding_mode='zeros'):
         super(DeconvBlock, self).__init__()
-        padding = 1 if kernel_size == 3 else kernel_size // 2
+        padding = 1 if ksize == 3 else ksize // 2
         layers = [
             nn.ConvTranspose2d(in_ch,
                                out_ch,
-                               kernel_size,
+                               ksize,
                                stride,
                                padding,
                                output_padding,
-                               bias=(norm != 'bn'))
+                               bias=(norm != 'bn'),
+                               padding_mode=padding_mode)
         ]
 
         if norm == 'bn':
@@ -107,6 +116,8 @@ class DeconvBlock(nn.Module):
             layers.append(nn.ReLU(inplace=True))
         elif act == 'lrelu':
             layers.append(nn.LeakyReLU(0.2, inplace=True))
+        elif act == 'tanh':
+            layers.append(nn.Tanh())
 
         self.deconv = nn.Sequential(*layers)
         self.norm = norm
@@ -120,14 +131,17 @@ class DeconvBlock(nn.Module):
         for m in self.modules():
             if isinstance(m, nn.ConvTranspose2d):
                 if self.act == 'relu':
-                    a = 0
+                    nn.init.kaiming_normal_(m.weight)
                 elif self.act == 'lrelu':
-                    a = 0.2
+                    nn.init.kaiming_normal_(m.weight, a=0.2)
+                elif self.act == 'tanh':
+                    nn.init.kaiming_normal_(m.weight, nonlinearity='tanh')
                 else:
-                    a = 1
-                nn.init.kaiming_normal_(m.weight, a, mode='fan_out')
+                    nn.init.kaiming_normal_(m.weight, nonlinearity='linear')
+
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
+
             elif isinstance(m, nn.BatchNorm2d):
                 nn.init.ones_(m.weight)
                 nn.init.zeros_(m.bias)
@@ -164,49 +178,43 @@ class DenseBlock(nn.Module):
         return x
 
 
-class CB(nn.Module):
+class _ConvBlock(nn.Module):
     def __init__(self, in_ch, out_ch):
-        super(CB, self).__init__()
+        super(_ConvBlock, self).__init__()
         self.in_ch = in_ch
         self.out_ch = out_ch
 
-        self.layers = nn.Sequential(
-            ConvBlock(in_ch, in_ch // 2),
-            ConvBlock(in_ch // 2, out_ch, kernel_size=1),
-        )
+        self.layers = nn.Sequential()
 
     def forward(self, x):
         return self.layers(x)
 
 
-class ECB(nn.Module):
+class CB(_ConvBlock):
     def __init__(self, in_ch, out_ch):
-        super(ECB, self).__init__()
-        self.in_ch = in_ch
-        self.out_ch = out_ch
-
+        super(CB, self).__init__(in_ch, out_ch)
         self.layers = nn.Sequential(
-            ConvBlock(in_ch, in_ch // 2, kernel_size=1),
+            ConvBlock(in_ch, in_ch // 2),
+            ConvBlock(in_ch // 2, out_ch, ksize=1),
+        )
+
+
+class ECB(_ConvBlock):
+    def __init__(self, in_ch, out_ch):
+        super(ECB, self).__init__(in_ch, out_ch)
+        self.layers = nn.Sequential(
+            ConvBlock(in_ch, in_ch // 2, ksize=1),
             ConvBlock(in_ch // 2, out_ch),
         )
 
-    def forward(self, x):
-        return self.layers(x)
 
-
-class DCB(nn.Module):
+class DCB(_ConvBlock):
     def __init__(self, in_ch, out_ch):
-        super(DCB, self).__init__()
-        self.in_ch = in_ch
-        self.out_ch = out_ch
-
+        super(DCB, self).__init__(in_ch, out_ch)
         self.layers = nn.Sequential(
             ConvBlock(in_ch, in_ch // 2),
             ConvBlock(in_ch // 2, out_ch),
         )
-
-    def forward(self, x):
-        return self.layers(x)
 
 
 class RFN(nn.Module):
@@ -220,7 +228,7 @@ class RFN(nn.Module):
         self.conv2 = ConvBlock(num_ch, num_ch)
 
         self.layers = nn.Sequential(
-            ConvBlock(num_ch * 2, num_ch, kernel_size=1),
+            ConvBlock(num_ch * 2, num_ch, ksize=1),
             ConvBlock(num_ch, num_ch),
             ConvBlock(num_ch, num_ch),
         )

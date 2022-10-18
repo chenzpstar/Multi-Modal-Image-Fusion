@@ -13,7 +13,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-__all__ = ['FusionLoss', 'SSIM', 'MS_SSIM', 'MSW_SSIM', 'TVLoss']
+__all__ = ['SSIM', 'MS_SSIM', 'MSW_SSIM', 'SSIMLoss', 'PixelLoss', 'TVLoss']
 
 eps = 1e-7
 
@@ -95,8 +95,7 @@ def _ssim(img1,
     cs = v1 / v2
     ssim = l * cs
 
-    v = torch.full_like(sigma1_sq, 1e-4)
-    sigma1 = torch.where(sigma1_sq < 1e-4, v, sigma1_sq)
+    sigma1 = sigma1_sq.clamp(min=1e-4)
 
     if size_average:
         ssim, cs, sigma1 = ssim.mean(dim=(1, 2, 3)), cs.mean(

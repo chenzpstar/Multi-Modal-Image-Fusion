@@ -48,8 +48,8 @@ def setup_dist(rank=0, world_size=1):
 
 
 def reduce_value(value, world_size=1, average=True):
-    with torch.no_grad():
-        if world_size > 1:
+    if world_size > 1:
+        with torch.no_grad():
             dist.all_reduce(value)
 
             if average:

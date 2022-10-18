@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-# @file name  : dataset_patches.py
+# @file name  : patches.py
 # @author     : chenzhanpeng https://github.com/chenzpstar
 # @date       : 2022-08-06
 # @brief      : 图像块读取类
@@ -81,7 +81,7 @@ if __name__ == '__main__':
         num_workers=0,
     )
 
-    for idx, (img1, img2) in enumerate(train_loader):
+    for img1, img2 in train_loader:
         result = tuple(
             map(denorm, (img1[0], img2[0], (img1[0] + img2[0]) / 2.0)))
         result = np.concatenate(result, axis=1)

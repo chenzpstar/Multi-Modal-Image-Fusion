@@ -48,7 +48,6 @@ class _FusionModel(nn.Module):
             recon_img = self.decoder(feat)
 
             return recon_img
-
         else:
             # extract
             feat1 = self.encoder(img1)
@@ -300,7 +299,6 @@ class SEDRFuse(nn.Module):
             recon_img = self.decoder(f_conv1, f_conv2, f_res)
 
             return recon_img
-
         else:
             # extract
             f1_conv1, f1_conv2, f1_res = self.encoder(img1)

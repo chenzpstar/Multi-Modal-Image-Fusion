@@ -29,7 +29,7 @@ class ConvBlock(nn.Module):
                  groups=1,
                  norm=None,
                  act='relu',
-                 padding_mode='zeros'):
+                 padding_mode='reflect'):
         super(ConvBlock, self).__init__()
         padding = 1 if ksize == 3 else ksize // 2
         layers = [
@@ -256,15 +256,14 @@ class NestEncoder(nn.Module):
 
         self.ECB4_3 = block(in_ch[3] * 7 + in_ch[2] + out_ch[2], out_ch[3])
 
-        self.down1 = ConvBlock(
-            out_ch[1], out_ch[1],
-            stride=2) if down_mode == 'stride' else nn.MaxPool2d(2, 2)
-        self.down2 = ConvBlock(
-            in_ch[2] * 2, in_ch[2] *
-            2, stride=2) if down_mode == 'stride' else nn.MaxPool2d(2, 2)
-        self.down3 = ConvBlock(
-            out_ch[2], out_ch[2],
-            stride=2) if down_mode == 'stride' else nn.MaxPool2d(2, 2)
+        if down_mode == 'stride':
+            self.down1 = ConvBlock(out_ch[1], out_ch[1], stride=2)
+            self.down2 = ConvBlock(in_ch[2] * 2, in_ch[2] * 2, stride=2)
+            self.down3 = ConvBlock(out_ch[2], out_ch[2], stride=2)
+        else:
+            self.down1 = nn.MaxPool2d(2, 2)
+            self.down2 = nn.MaxPool2d(2, 2)
+            self.down3 = nn.MaxPool2d(2, 2)
 
     def forward(self, feats):
         x2_1 = self.ECB2_1(concat_fusion(feats[1]))
@@ -294,22 +293,51 @@ class NestDecoder(nn.Module):
 
         self.DCB1_3 = block(num_ch[0] * 3 + num_ch[1], num_ch[0])
 
-        if up_mode == 'nearest':
-            self.up = nn.Upsample(scale_factor=2, mode=up_mode)
-        else:
-            self.up = nn.Upsample(scale_factor=2,
-                                  mode=up_mode,
-                                  align_corners=True)
+        self.up = Upsample(up_mode)
 
     def forward(self, feats):
-        x1_1 = self.DCB1_1(concat_fusion((feats[0], self.up(feats[1]))))
-        x2_1 = self.DCB2_1(concat_fusion((feats[1], self.up(feats[2]))))
-        x3_1 = self.DCB3_1(concat_fusion((feats[2], self.up(feats[3]))))
+        x1_1 = self.DCB1_1(
+            concat_fusion((feats[0], self.up(feats[1], feats[0].shape))))
+        x2_1 = self.DCB2_1(
+            concat_fusion((feats[1], self.up(feats[2], feats[1].shape))))
+        x3_1 = self.DCB3_1(
+            concat_fusion((feats[2], self.up(feats[3], feats[2].shape))))
 
-        x1_2 = self.DCB1_2(concat_fusion((feats[0], x1_1, self.up(x2_1))))
-        x2_2 = self.DCB2_2(concat_fusion((feats[1], x2_1, self.up(x3_1))))
+        x1_2 = self.DCB1_2(
+            concat_fusion((feats[0], x1_1, self.up(x2_1, x1_1.shape))))
+        x2_2 = self.DCB2_2(
+            concat_fusion((feats[1], x2_1, self.up(x3_1, x2_1.shape))))
 
-        x1_3 = self.DCB1_3(concat_fusion(
-            (feats[0], x1_1, x1_2, self.up(x2_2))))
+        x1_3 = self.DCB1_3(
+            concat_fusion((feats[0], x1_1, x1_2, self.up(x2_2, x1_2.shape))))
 
         return x1_3
+
+
+class Upsample(nn.Module):
+    def __init__(self, mode):
+        super(Upsample, self).__init__()
+        if mode == 'nearest':
+            self.up = nn.Upsample(scale_factor=2, mode=mode)
+        else:
+            self.up = nn.Upsample(scale_factor=2,
+                                  mode=mode,
+                                  align_corners=True)
+
+    def forward(self, feat, shape):
+        out = self.up(feat)
+
+        if out.shape != shape:
+            out = self._pad(out, shape)
+
+        return out
+
+    @staticmethod
+    def _pad(feat, shape):
+        pad_h = shape[-2] - feat.shape[-2]
+        pad_w = shape[-1] - feat.shape[-1]
+        pad_h1, pad_w1 = pad_h // 2, pad_w // 2
+        pad_h2, pad_w2 = pad_h - pad_h1, pad_w - pad_w1
+        padding = (pad_w1, pad_w2, pad_h1, pad_h2)
+
+        return nn.ReflectionPad2d(padding)(feat)

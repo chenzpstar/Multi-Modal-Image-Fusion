@@ -44,7 +44,7 @@ def attention_fusion(tensor1,
                      mode='mean',
                      spatial_mode='l1',
                      channel_mode='avg'):
-    f_spatial = spatial_fusion(tensor1, tensor2, spatial_mode, softmax=True)
+    f_spatial = spatial_fusion(tensor1, tensor2, spatial_mode, softmax=False)
     f_channel = channel_fusion(tensor1, tensor2, channel_mode, softmax=False)
 
     if mode == 'mean':

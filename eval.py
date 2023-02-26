@@ -18,22 +18,21 @@ import argparse
 
 import cv2
 import torch
-from torch.utils.data import DataLoader
-
 from common import AverageMeter, save_result
 from core.loss import SSIM
 from core.model import *
 from data.dataset import FusionDataset as Dataset
+from torch.utils.data import DataLoader
 
 
 def get_args():
     parser = argparse.ArgumentParser(description='Inference')
-    parser.add_argument("--data",
-                        default="polar",
+    parser.add_argument('--data',
+                        default='roadscene',
                         type=str,
-                        help="dataset folder name")
+                        help='dataset folder name')
     parser.add_argument('--ckpt',
-                        default='2022-08-09_18-50',
+                        default='2023-02-26_23-15',
                         type=str,
                         help='checkpoint folder name')
 
@@ -49,8 +48,8 @@ def eval_model(model, data_loader, eval_fn, device, save_dir=None):
 
         with torch.no_grad():
             pred = model(img1, img2)
-            ssim1 = eval_fn(img1, pred)['ssim'].mean()
-            ssim2 = eval_fn(img2, pred)['ssim'].mean()
+            ssim1 = eval_fn(pred, img1)['ssim'].mean()
+            ssim2 = eval_fn(pred, img2)['ssim'].mean()
             avg_ssim = (ssim1 + ssim2) / 2.0
 
         ssim.update(avg_ssim.item())
@@ -85,7 +84,8 @@ if __name__ == '__main__':
         os.makedirs(eval_save_dir)
 
     # 1. data
-    eval_set = Dataset(data_dir, 'valid')
+    eval_set = Dataset(data_dir, None, set_type='valid')
+    # eval_set = Dataset(data_dir, 'valid')
     eval_loader = DataLoader(
         eval_set,
         batch_size=1,
@@ -95,12 +95,14 @@ if __name__ == '__main__':
     )
 
     # 2. model
-    model = PFNetv1().to(device, non_blocking=True)
+    model = MyFusion().to(device, non_blocking=True)
+    # model = NestFuse().to(device, non_blocking=True)
+    # model = PFNetv1().to(device, non_blocking=True)
     model.load_state_dict(torch.load(ckpt_path, map_location=device),
                           strict=False)
     model.eval()
 
-    eval_fn = SSIM(val_range=1, no_luminance=False)
+    eval_fn = SSIM(no_luminance=False)
 
     # 3. eval
     eval_ssim = eval_model(model, eval_loader, eval_fn, device, eval_save_dir)

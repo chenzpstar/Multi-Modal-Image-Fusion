@@ -66,7 +66,6 @@ if __name__ == '__main__':
     sys.path.append(os.path.join(BASE_DIR, '..'))
 
     from torch.utils.data import DataLoader
-
     from transform import denorm
 
     train_path = os.path.join(BASE_DIR, 'samples')

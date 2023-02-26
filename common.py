@@ -12,9 +12,8 @@ import random
 import numpy as np
 import torch
 import torch.distributed as dist
-from torch.optim.lr_scheduler import _LRScheduler
-
 from data.transform import denorm
+from torch.optim.lr_scheduler import _LRScheduler
 
 
 def save_result(pred, img1=None, img2=None):

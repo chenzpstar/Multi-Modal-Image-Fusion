@@ -15,7 +15,7 @@ import numpy as np
 
 def count_patches(data_dir, patch_size, stride):
     count = 0
-    img_dir = os.path.join(data_dir, 'vis')
+    img_dir = os.path.join(data_dir, 'vi')
 
     for img in os.listdir(img_dir):
         img_path1 = os.path.join(img_dir, img)
@@ -40,7 +40,7 @@ def count_patches(data_dir, patch_size, stride):
 
 def gen_patches(data_dir, num_patches, patch_size, stride):
     count = 0
-    img_dir = os.path.join(data_dir, 'vis')
+    img_dir = os.path.join(data_dir, 'vi')
 
     patches = np.zeros((num_patches, 2, patch_size, patch_size),
                        dtype=np.uint8)
@@ -49,7 +49,7 @@ def gen_patches(data_dir, num_patches, patch_size, stride):
         img_path1 = os.path.join(img_dir, img)
         img1 = cv2.imread(img_path1, cv2.IMREAD_GRAYSCALE)
 
-        img_path2 = img_path1.replace('vis', 'dolp')
+        img_path2 = img_path1.replace('vi', 'po')
         img2 = cv2.imread(img_path2, cv2.IMREAD_GRAYSCALE)
 
         h, w = img1.shape

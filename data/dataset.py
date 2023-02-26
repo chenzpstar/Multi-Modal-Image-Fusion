@@ -13,6 +13,7 @@ from functools import partial
 import cv2
 import numpy as np
 import torch
+from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset
 from torchvision import transforms as tf
 
@@ -21,22 +22,36 @@ try:
 except:
     from transform import norm, transform
 
+img_size = 256
+
 
 class FusionDataset(Dataset):
     def __init__(self,
                  root_dir,
                  set_name,
-                 mode='dolp',
+                 set_type='train',
+                 img_type='ir',
                  norm=None,
-                 transform=False):
+                 transform=False,
+                 fix_size=False):
         super(FusionDataset, self).__init__()
         self.root_dir = root_dir
         self.set_name = set_name
-        self.mode = mode
+        self.set_type = set_type
+        self.img_type = img_type
         self.norm = norm
         self.transform = transform
+        self.fix_size = fix_size
         self.data_info = []
+        self.train_data_info = []
+        self.valid_data_info = []
         self._get_data_info()
+
+        if set_name is None:
+            if set_type == 'train':
+                self.data_info = self.train_data_info
+            elif set_type == 'valid':
+                self.data_info = self.valid_data_info
 
     def __getitem__(self, index):
         img_path1, img_path2 = self.data_info[index]
@@ -54,6 +69,18 @@ class FusionDataset(Dataset):
             map(lambda img: torch.from_numpy(img[None, :].copy()).float(),
                 imgs))
 
+        if self.fix_size:
+            imgs = torch.stack(imgs, dim=0)
+
+            min_size = min(imgs.shape[-2:])
+            if min_size < img_size:
+                imgs = tf.RandomCrop(min_size)(imgs)
+                imgs = tf.Resize(img_size)(imgs)
+            else:
+                imgs = tf.RandomCrop(img_size)(imgs)
+
+            return imgs[0], imgs[1]
+
         return imgs
 
     def __len__(self):
@@ -61,28 +88,48 @@ class FusionDataset(Dataset):
         return len(self.data_info)
 
     def _get_data_info(self):
-        img_dir = os.path.join(self.root_dir, self.set_name, 'vis')
+        img_info1, img_info2 = [], []
+
+        if self.set_name is None:
+            img_dir = os.path.join(self.root_dir, 'vi')
+        else:
+            img_dir = os.path.join(self.root_dir, self.set_name, 'vi')
 
         for img in os.listdir(img_dir):
-            if img.endswith('.bmp') or img.endswith('.jpg'):
+            if img.endswith('.bmp') or img.endswith('.jpg') or img.endswith(
+                    '.png'):
                 img_path1 = os.path.join(img_dir, img)
 
-                assert self.mode in ['dolp', 'ir']
-                img_path2 = img_path1.replace('vis', self.mode)
+                assert self.img_type in ['ir', 'po']
+                img_path2 = img_path1.replace('vi', self.img_type)
 
                 if os.path.isfile(img_path2):
-                    self.data_info.append((img_path1, img_path2))
+                    img_info1.append(img_path1)
+                    img_info2.append(img_path2)
 
-        random.shuffle(self.data_info)
+        if self.set_name is None:
+            train_img_path1, valid_img_path1, train_img_path2, valid_img_path2 = train_test_split(
+                img_info1, img_info2, test_size=0.2, random_state=0)
+            self.train_data_info = list(zip(train_img_path1, train_img_path2))
+            self.valid_data_info = list(zip(valid_img_path1, valid_img_path2))
+        else:
+            self.data_info = list(zip(img_info1, img_info2))
+            random.shuffle(self.data_info)
 
 
 class AEDataset(Dataset):
-    def __init__(self, root_dir, mode='dolp', norm=None, transform=False):
+    def __init__(self,
+                 root_dir,
+                 img_type='ir',
+                 norm=None,
+                 transform=False,
+                 fix_size=False):
         super(AEDataset, self).__init__()
         self.root_dir = root_dir
-        self.mode = mode
+        self.img_type = img_type
         self.norm = norm
         self.transform = transform
+        self.fix_size = fix_size
         self.data_info = []
         self._get_data_info()
 
@@ -97,9 +144,13 @@ class AEDataset(Dataset):
 
         img = torch.from_numpy(img[None, :].copy()).float()
 
-        min_size = min(img.shape[-2:])
-        img = tf.RandomCrop(min_size)(img)
-        img = tf.Resize(224)(img)
+        if self.fix_size:
+            min_size = min(img.shape[-2:])
+            if min_size < img_size:
+                img = tf.RandomCrop(min_size)(img)
+                img = tf.Resize(img_size)(img)
+            else:
+                img = tf.RandomCrop(img_size)(img)
 
         return img
 
@@ -108,18 +159,20 @@ class AEDataset(Dataset):
         return len(self.data_info)
 
     def _get_data_info(self):
-        img_dir1 = os.path.join(self.root_dir, 'vis')
+        img_dir1 = os.path.join(self.root_dir, 'vi')
 
-        assert self.mode in ['dolp', 'ir']
-        img_dir2 = img_dir1.replace('vis', self.mode)
+        assert self.img_type in ['ir', 'po']
+        img_dir2 = img_dir1.replace('vi', self.img_type)
 
         for img in os.listdir(img_dir1):
-            if img.endswith('.jpg'):
+            if img.endswith('.bmp') or img.endswith('.jpg') or img.endswith(
+                    '.png'):
                 img_path = os.path.join(img_dir1, img)
                 self.data_info.append(img_path)
 
         for img in os.listdir(img_dir2):
-            if img.endswith('.jpg'):
+            if img.endswith('.bmp') or img.endswith('.jpg') or img.endswith(
+                    '.png'):
                 img_path = os.path.join(img_dir2, img)
                 self.data_info.append(img_path)
 
@@ -135,18 +188,19 @@ if __name__ == '__main__':
     sys.path.append(os.path.join(BASE_DIR, '..'))
 
     from torch.utils.data import DataLoader
-
     from transform import denorm
 
-    # flag = 0
-    flag = 1
+    flag = 0
+    # flag = 1
 
     if flag == 0:
         train_path = os.path.join(BASE_DIR, 'samples')
         train_set = FusionDataset(train_path,
                                   'train',
+                                  img_type='po',
                                   norm='min-max',
-                                  transform=True)
+                                  transform=True,
+                                  fix_size=True)
         train_loader = DataLoader(
             train_set,
             batch_size=1,
@@ -168,7 +222,11 @@ if __name__ == '__main__':
 
     if flag == 1:
         train_path = os.path.join(BASE_DIR, 'samples', 'train')
-        train_set = AEDataset(train_path, norm='min-max', transform=True)
+        train_set = AEDataset(train_path,
+                              img_type='po',
+                              norm='min-max',
+                              transform=True,
+                              fix_size=True)
         train_loader = DataLoader(
             train_set,
             batch_size=1,

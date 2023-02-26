@@ -13,7 +13,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-__all__ = ['SSIM', 'MS_SSIM', 'MSW_SSIM', 'SSIMLoss', 'PixelLoss', 'TVLoss']
+__all__ = [
+    'SSIM', 'MS_SSIM', 'MSW_SSIM', 'SSIMLoss', 'PixelLoss', 'GradLoss',
+    'TVLoss', 'NormLoss'
+]
 
 eps = 1e-7
 
@@ -84,7 +87,8 @@ def _ssim(img1,
     sigma12 = _gaussian_filter(img1 * img2, window, use_padding) - mu1_mu2
 
     K1, K2 = 0.01, 0.03
-    C1, C2 = (K1 * L)**2, (K2 * L)**2
+    C1 = (K1 * L)**2
+    C2 = (K2 * L)**2
 
     m1 = 2.0 * mu1_mu2 + C1
     m2 = mu1_sq + mu2_sq + C1
@@ -98,8 +102,9 @@ def _ssim(img1,
     sigma1 = sigma1_sq.clamp(min=1e-4)
 
     if size_average:
-        ssim, cs, sigma1 = ssim.mean(dim=(1, 2, 3)), cs.mean(
-            dim=(1, 2, 3)), sigma1.mean(dim=(1, 2, 3))
+        ssim = ssim.mean(dim=(1, 2, 3))
+        cs = cs.mean(dim=(1, 2, 3))
+        sigma1 = sigma1.mean(dim=(1, 2, 3))
 
     out = {'ssim': ssim, 'cs': cs, 'sigma': sigma1}
 
@@ -252,26 +257,26 @@ class SSIMLoss(nn.Module):
 
         if self.mode == 'ssim':
             ssim_fn = SSIM(11, channel, self.val_range, self.no_luminance)
-            ssim1 = ssim_fn(img1, pred)['ssim'].mean()
-            ssim2 = ssim_fn(img2, pred)['ssim'].mean()
-            loss = 1.0 - (ssim1 + ssim2) / 2.0
+            ssim1 = ssim_fn(pred, img1)['ssim'].mean()
+            ssim2 = ssim_fn(pred, img2)['ssim'].mean()
+            loss = (ssim1 + ssim2) / 2.0
 
         elif self.mode == 'ms-ssim':
             msssim_fn = MS_SSIM(11, channel, self.val_range, self.no_luminance)
-            msssim1 = msssim_fn(img1, pred).mean()
-            msssim2 = msssim_fn(img2, pred).mean()
-            loss = 1.0 - (msssim1 + msssim2) / 2.0
+            msssim1 = msssim_fn(pred, img1).mean()
+            msssim2 = msssim_fn(pred, img2).mean()
+            loss = (msssim1 + msssim2) / 2.0
 
         elif self.mode == 'msw-ssim':
             mswssim_fn = MSW_SSIM((11, 9, 7, 5, 3), channel, self.val_range,
                                   self.no_luminance)
-            loss = 1.0 - mswssim_fn(img1, img2, pred)
+            loss = mswssim_fn(img1, img2, pred)
 
         else:
             raise ValueError(
                 "only supported ['ssim', 'ms-ssim', 'msw-ssim'] mode")
 
-        return self.weight * loss
+        return self.weight * (1.0 - loss)
 
 
 class PixelLoss(nn.Module):
@@ -279,18 +284,55 @@ class PixelLoss(nn.Module):
         super(PixelLoss, self).__init__()
         self.mode = mode
         self.weight = weight
+        self.loss_fn = NormLoss(mode, weight)
 
-    def forward(self, img, pred):
-        if self.mode == 'l1':
-            loss = torch.abs(img - pred).mean()
+    def forward(self, img1, img2, pred, mode='avg'):
+        if mode == 'avg':
+            loss1 = pred - img1
+            loss2 = pred - img2
 
-        elif self.mode == 'l2':
-            loss = torch.pow(img - pred, 2).mean()
+            return (self.loss_fn(loss1) + self.loss_fn(loss2)) / 2.0
 
-        else:
-            raise ValueError("only supported ['l1', 'l2'] mode")
+        elif mode == 'max':
+            loss = pred - torch.max(img1, img2)
 
-        return self.weight * loss
+            return self.loss_fn(loss)
+
+
+class GradLoss(nn.Module):
+    def __init__(self, mode='l1', weight=1.0):
+        super(GradLoss, self).__init__()
+        self.mode = mode
+        self.weight = weight
+        self.loss_fn = NormLoss(mode, weight)
+
+    @staticmethod
+    def _sobel(img):
+        sobel_x = torch.FloatTensor([[-1, 0, 1], [-2, 0, 2],
+                                     [-1, 0, 1]]).reshape([1, 1, 3, 3])
+        sobel_y = torch.FloatTensor([[-1, -2, -1], [0, 0, 0],
+                                     [1, 2, 1]]).reshape([1, 1, 3, 3])
+
+        grad_x = F.conv2d(img, sobel_x)
+        grad_y = F.conv2d(img, sobel_y)
+
+        return torch.abs(grad_x) + torch.abs(grad_y)
+
+    def forward(self, img1, img2, pred, mode='avg'):
+        img1 = self._sobel(img1)
+        img2 = self._sobel(img2)
+        pred = self._sobel(pred)
+
+        if mode == 'avg':
+            loss1 = pred - img1
+            loss2 = pred - img2
+
+            return (self.loss_fn(loss1) + self.loss_fn(loss2)) / 2.0
+
+        elif mode == 'max':
+            loss = pred - torch.max(img1, img2)
+
+            return self.loss_fn(loss)
 
 
 class TVLoss(nn.Module):
@@ -298,20 +340,40 @@ class TVLoss(nn.Module):
         super(TVLoss, self).__init__()
         self.mode = mode
         self.weight = weight
+        self.loss_fn = NormLoss(mode, weight)
+
+    def forward(self, x):
+        tv_h = x[:, :, 1:, :] - x[:, :, :-1, :]
+        tv_w = x[:, :, :, 1:] - x[:, :, :, :-1]
+
+        return self.loss_fn(tv_h) + self.loss_fn(tv_w)
+
+
+class NormLoss(nn.Module):
+    def __init__(self, mode='l1', weight=1.0):
+        super(NormLoss, self).__init__()
+        self.mode = mode
+        self.weight = weight
+
+    @staticmethod
+    def _l1_loss(x):
+        return torch.abs(x).mean()
+
+    @staticmethod
+    def _l2_loss(x):
+        return torch.pow(x, 2).mean()
 
     def forward(self, x):
         if self.mode == 'l1':
-            tv_h = torch.abs(x[:, :, 1:, :] - x[:, :, :-1, :]).mean()
-            tv_w = torch.abs(x[:, :, :, 1:] - x[:, :, :, :-1]).mean()
+            loss = self._l1_loss(x)
 
         elif self.mode == 'l2':
-            tv_h = torch.pow(x[:, :, 1:, :] - x[:, :, :-1, :], 2).mean()
-            tv_w = torch.pow(x[:, :, :, 1:] - x[:, :, :, :-1], 2).mean()
+            loss = self._l2_loss(x)
 
         else:
             raise ValueError("only supported ['l1', 'l2'] mode")
 
-        return self.weight * (tv_h + tv_w)
+        return self.weight * loss
 
 
 if __name__ == '__main__':
@@ -322,11 +384,13 @@ if __name__ == '__main__':
 
     ssim_mode = ['ssim', 'ms-ssim', 'msw-ssim']
     pixel_mode = ['l1', 'l2']
+    grad_mode = ['l1', 'l2']
     tv_mode = ['l1', 'l2']
 
-    loss_fn1 = SSIMLoss(ssim_mode[2], val_range=1, no_luminance=False)
-    loss_fn2 = PixelLoss(pixel_mode[0], weight=0.1)
-    loss_fn3 = TVLoss(tv_mode[0])
+    loss_fn1 = SSIMLoss(ssim_mode[0], no_luminance=False, weight=1)
+    loss_fn2 = PixelLoss(pixel_mode[0], weight=0.01)
+    loss_fn3 = GradLoss(grad_mode[0], weight=0.1)
+    loss_fn4 = TVLoss(tv_mode[0])
 
     x1 = torch.rand(2, 1, 224, 224)
     x2 = torch.rand(2, 1, 224, 224)
@@ -335,11 +399,14 @@ if __name__ == '__main__':
     loss1 = loss_fn1(x1, x2, y)
     print(loss1.item())
 
-    loss2 = loss_fn2((x1 + x2) / 2.0, y)
+    loss2 = loss_fn2(x1, x2, y)
     print(loss2.item())
 
-    loss3 = loss_fn3(x1 - y)
+    loss3 = loss_fn3(x1, x2, y)
     print(loss3.item())
 
-    total_loss = loss1 + loss2
+    loss4 = loss_fn4(y - x1)
+    print(loss4.item())
+
+    total_loss = loss1 + loss2 + loss3
     print(total_loss.item())

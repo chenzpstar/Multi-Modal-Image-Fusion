@@ -19,8 +19,8 @@ except:
 
 __all__ = [
     'PFNetv1', 'PFNetv2', 'DeepFuse', 'DenseFuse', 'VIFNet', 'DBNet',
-    'SEDRFuse', 'NestFuse', 'RFNNest', 'UNFusion', 'IFCNN', 'DIFNet', 'PMGI',
-    'MyFusion'
+    'SEDRFuse', 'NestFuse', 'RFNNest', 'UNFusion', 'Res2Fusion', 'MAFusion',
+    'IFCNN', 'DIFNet', 'PMGI', 'MyFusion'
 ]
 
 
@@ -181,7 +181,7 @@ class DenseFuse(_FusionModel):
         if mode == 'sum':
             return element_fusion(feat1, feat2, mode)
         elif mode == 'l1':
-            return spatial_fusion(feat1, feat2, mode, softmax=False)
+            return attention_fusion(feat1, feat2, 'sa', spatial_mode=mode)
         else:
             raise ValueError("only supported ['sum', 'l1'] mode")
 
@@ -219,7 +219,7 @@ class DBNet(_FusionModel):
             ConvLayer(32, 64, stride=2),
             ConvLayer(64, 128, stride=2),
             ConvLayer(128, 64, stride=2),
-            nn.Upsample(scale_factor=8, mode='bilinear', align_corners=True),
+            Upsample(mode='bilinear', scale_factor=8),
         )
         self.decode = nn.Sequential(
             ConvLayer(128, 64),
@@ -239,7 +239,7 @@ class DBNet(_FusionModel):
         if mode == 'sum':
             return element_fusion(feat1, feat2, mode)
         elif mode == 'avg':
-            return channel_fusion(feat1, feat2, mode, softmax=False)
+            return attention_fusion(feat1, feat2, 'ca', channel_mode=mode)
         else:
             raise ValueError("only supported ['sum', 'avg'] mode")
 
@@ -365,8 +365,8 @@ class NestFuse(_FusionModel):
 
 class RFNNest(NestFuse):
     '''RFN-Nest: An End-to-End Residual Fusion Network for Infrared and Visible Images'''
-    def __init__(self):
-        super(RFNNest, self).__init__()
+    def __init__(self, down_mode='maxpool', up_mode='nearest'):
+        super(RFNNest, self).__init__(down_mode, up_mode)
         num_ch = [64, 112, 160, 208]
 
         # fusion
@@ -415,14 +415,14 @@ class UNFusion(_FusionModel):
 
     def encoder(self, img):
         x1_0 = self.CB1_0(img)
+
         d1_0 = self.down1(x1_0)
-
         x2_0 = self.CB2_0(d1_0)
+
         d2_0 = self.down2(x2_0)
-
         x3_0 = self.CB3_0(d2_0)
-        d3_0 = self.down3(x3_0)
 
+        d3_0 = self.down3(x3_0)
         x4_0 = self.CB4_0(d3_0)
 
         return self.encode((x1_0, (x2_0, d1_0), (x3_0, d2_0), (x4_0, d3_0)))
@@ -437,6 +437,75 @@ class UNFusion(_FusionModel):
 
     def decoder(self, feats):
         return self.conv_out(self.decode(feats))
+
+
+class Res2Fusion(_FusionModel):
+    '''Res2Fusion: Infrared and Visible Image Fusion Based on Dense Res2net and Double Nonlocal Attention Models'''
+    def __init__(self):
+        super(Res2Fusion, self).__init__()
+        # encoder
+        self.conv_in = ConvLayer(1, 16)
+        self.RB1 = Res2ConvBlock(16, 32, 4)
+        self.RB2 = Res2ConvBlock(48, 64, 8)
+
+        # decoder
+        self.decode = nn.Sequential(
+            ConvLayer(112, 64),
+            ConvLayer(64, 32),
+            ConvLayer(32, 16),
+            ConvLayer(16, 1),
+        )
+
+    def encoder(self, img):
+        x = self.conv_in(img)
+        x = concat_fusion((x, self.RB1(x)))
+        x = concat_fusion((x, self.RB2(x)))
+
+        return x
+
+    def fusion(self, feat1, feat2, mode='att', spatial='nl', channel='nl'):
+        if mode == 'add':
+            return element_fusion(feat1, feat2, 'mean')
+        elif mode == 'att':
+            return attention_fusion(feat1, feat2, 'mean', spatial, channel)
+        else:
+            raise ValueError("only supported ['add', 'att'] mode")
+
+
+class MAFusion(NestFuse):
+    '''MAFusion: Multiscale Attention Network for Infrared and Visible Image Fusion'''
+    def __init__(self, down_mode='maxpool', up_mode='bilinear'):
+        super(MAFusion, self).__init__(down_mode, up_mode)
+        num_ch = [64, 128, 256, 512]
+
+        # encoder
+        self.conv_in = ConvLayer(1, 16, ksize=1)
+        self.CB1_0 = ConvBlock(16, num_ch[0])
+        self.CB2_0 = ConvBlock(num_ch[0], num_ch[1])
+        self.CB3_0 = ConvBlock(num_ch[1], num_ch[2])
+        self.CB4_0 = ConvBlock(num_ch[2], num_ch[3])
+
+        if down_mode == 'stride':
+            self.down1 = ConvLayer(num_ch[0], num_ch[0], stride=2)
+            self.down2 = ConvLayer(num_ch[1], num_ch[1], stride=2)
+            self.down3 = ConvLayer(num_ch[2], num_ch[2], stride=2)
+
+        elif down_mode == 'maxpool':
+            self.down1 = nn.MaxPool2d(2, 2)
+            self.down2 = nn.MaxPool2d(2, 2)
+            self.down3 = nn.MaxPool2d(2, 2)
+
+        # decoder
+        self.decode = FSDecoder(ConvBlock, num_ch, up_mode)
+        self.conv_out = ConvLayer(num_ch[0], 1, ksize=1)
+
+    def fusion(self, feats1, feats2, mode='mean'):
+        f1_0 = attention_fusion(feats1[0], feats2[0], mode)
+        f2_0 = attention_fusion(feats1[1], feats2[1], mode)
+        f3_0 = attention_fusion(feats1[2], feats2[2], mode)
+        f4_0 = attention_fusion(feats1[3], feats2[3], mode)
+
+        return f1_0, f2_0, f3_0, f4_0
 
 
 # 3. general image fusion
@@ -559,51 +628,46 @@ class PMGI(nn.Module):
 
 
 class MyFusion(_FusionModel):
-    def __init__(self, down_mode='stride', up_mode='bilinear'):
+    def __init__(self,
+                 encoder=ConvBlock,
+                 decoder=NestDecoder,
+                 down_mode='stride',
+                 up_mode='bilinear'):
         super(MyFusion, self).__init__()
         num_ch = [16, 32, 64, 128]
+        # width = [16, 32, 64, 128]
+        width = [8, 16, 32, 64]
         # width = [4, 8, 16, 32]
 
         # encoder
-        self.conv_in = ConvLayer(1, 8, ksize=7)
+        # self.conv_in = ConvLayer(1, 8, ksize=1)
 
-        self.down1 = TransitionBlock(8, num_ch[0], stride=1)
+        self.down1 = TransitionBlock(1, num_ch[0], stride=1)
         self.down2 = TransitionBlock(num_ch[0], num_ch[1], down_mode=down_mode)
         self.down3 = TransitionBlock(num_ch[1], num_ch[2], down_mode=down_mode)
         self.down4 = TransitionBlock(num_ch[2], num_ch[3], down_mode=down_mode)
 
-        self.EB1 = ConvBlock(num_ch[0], num_ch[0])
-        self.EB2 = ConvBlock(num_ch[1], num_ch[1])
-        self.EB3 = ConvBlock(num_ch[2], num_ch[2])
-        self.EB4 = ConvBlock(num_ch[3], num_ch[3])
+        if encoder in [ConvBlock, SepConvBlock, ConvFormerBlock]:
+            self.EB1 = encoder(num_ch[0], num_ch[0])
+            self.EB2 = encoder(num_ch[1], num_ch[1])
+            self.EB3 = encoder(num_ch[2], num_ch[2])
+            self.EB4 = encoder(num_ch[3], num_ch[3])
 
-        # self.EB1 = SepConvBlock(num_ch[0])
-        # self.EB2 = SepConvBlock(num_ch[1])
-        # self.EB3 = SepConvBlock(num_ch[2])
-        # self.EB4 = SepConvBlock(num_ch[3])
-
-        # self.EB1 = Res2Block(num_ch[0])
-        # self.EB2 = Res2Block(num_ch[1])
-        # self.EB3 = Res2Block(num_ch[2])
-        # self.EB4 = Res2Block(num_ch[3])
-
-        # self.EB1 = ConvFormerBlock(num_ch[0])
-        # self.EB2 = ConvFormerBlock(num_ch[1])
-        # self.EB3 = ConvFormerBlock(num_ch[2])
-        # self.EB4 = ConvFormerBlock(num_ch[3])
-
-        # self.EB1 = Res2FormerBlock(num_ch[0], width[0])
-        # self.EB2 = Res2FormerBlock(num_ch[1], width[1])
-        # self.EB3 = Res2FormerBlock(num_ch[2], width[2])
-        # self.EB4 = Res2FormerBlock(num_ch[3], width[3])
+        elif encoder in [
+                MixConvBlock, Res2ConvBlock, MixFormerBlock, Res2FormerBlock
+        ]:
+            self.EB1 = encoder(num_ch[0], num_ch[0], width[0])
+            self.EB2 = encoder(num_ch[1], num_ch[1], width[1])
+            self.EB3 = encoder(num_ch[2], num_ch[2], width[2])
+            self.EB4 = encoder(num_ch[3], num_ch[3], width[3])
 
         # decoder
-        self.decode = NestDecoder(ConvBlock, num_ch, up_mode)
-        # self.decode = FSDecoder(ConvBlock, num_ch, up_mode)
-        self.conv_out = ConvLayer(num_ch[0], 1, ksize=1)
+        self.decode = decoder(ConvBlock, num_ch, up_mode)
+        self.conv_out = ConvLayer(num_ch[0], 1, ksize=1, act='relu')
 
     def encoder(self, img):
-        x1_0 = self.EB1(self.down1(self.conv_in(img)))
+        # x1_0 = self.EB1(self.down1(self.conv_in(img)))
+        x1_0 = self.EB1(self.down1(img))
         x2_0 = self.EB2(self.down2(x1_0))
         x3_0 = self.EB3(self.down3(x2_0))
         x4_0 = self.EB4(self.down4(x3_0))
@@ -611,6 +675,11 @@ class MyFusion(_FusionModel):
         return x1_0, x2_0, x3_0, x4_0
 
     def fusion(self, feats1, feats2, mode='mean'):
+        # f1_0 = element_fusion(feats1[0], feats2[0], mode)
+        # f2_0 = element_fusion(feats1[1], feats2[1], mode)
+        # f3_0 = element_fusion(feats1[2], feats2[2], mode)
+        # f4_0 = element_fusion(feats1[3], feats2[3], mode)
+
         f1_0 = attention_fusion(feats1[0], feats2[0], mode)
         f2_0 = attention_fusion(feats1[1], feats2[1], mode)
         f3_0 = attention_fusion(feats1[2], feats2[2], mode)
@@ -627,14 +696,33 @@ class MyFusion(_FusionModel):
 if __name__ == '__main__':
 
     import torch
-    from torchsummary import summary
 
-    models = (PFNetv1, PFNetv2, DeepFuse, DenseFuse, VIFNet, DBNet, SEDRFuse,
-              NestFuse, RFNNest, UNFusion, IFCNN, DIFNet, PMGI, MyFusion)
+    # models = [
+    #     PFNetv1, PFNetv2, DeepFuse, DenseFuse, VIFNet, DBNet, SEDRFuse,
+    #     NestFuse, RFNNest, UNFusion, Res2Fusion, MAFusion, IFCNN, DIFNet, PMGI
+    # ]
 
-    model = models[-1]()
-    print(model)
-    # summary(model, [(1, 224, 224), (1, 224, 224)], 2, device='cpu')
+    # model = models[0]
+    # print('model: {}'.format(model.__name__))
+
+    # model = model()
+
+    encoders = [
+        ConvBlock, SepConvBlock, MixConvBlock, Res2ConvBlock, ConvFormerBlock,
+        MixFormerBlock, Res2FormerBlock
+    ]
+    decoders = [NestDecoder, LSDecoder, FSDecoder]
+
+    encoder, decoder = encoders[0], decoders[0]
+    print('encoder: {}, decoder: {}'.format(encoder.__name__,
+                                            decoder.__name__))
+
+    model = MyFusion(encoder, decoder)
+
+    params = sum([param.nelement() for param in model.parameters()])
+    print('params: {:.3f}M'.format(params / 1e6))
+
+    # print(model)
 
     x1 = torch.rand(2, 1, 224, 224)
     x2 = torch.rand(2, 1, 224, 224)

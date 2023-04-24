@@ -8,6 +8,7 @@
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 try:
     from .fusion import concat_fusion
@@ -16,8 +17,9 @@ except:
 
 __all__ = [
     'ConvLayer', 'DeconvLayer', 'ResBlock', 'DenseBlock', 'SepConvBlock',
-    'Res2Block', 'ConvFormerBlock', 'Res2FormerBlock', 'TransitionBlock',
-    'ConvBlock', 'ECB', 'DCB', 'RFN', 'NestEncoder', 'NestDecoder', 'FSDecoder'
+    'MixConvBlock', 'Res2ConvBlock', 'ConvFormerBlock', 'MixFormerBlock',
+    'Res2FormerBlock', 'TransitionBlock', 'ConvBlock', 'ECB', 'DCB', 'RFN',
+    'NestEncoder', 'NestDecoder', 'LSDecoder', 'FSDecoder', 'Upsample'
 ]
 
 
@@ -206,9 +208,10 @@ class DenseBlock(nn.Module):
 
 class SepConvBlock(nn.Module):
     def __init__(self,
-                 num_ch,
+                 in_ch,
+                 out_ch,
                  expand_ratio=2,
-                 ksize=7,
+                 ksize=3,
                  bias=False,
                  act='relu',
                  residual=True,
@@ -217,18 +220,23 @@ class SepConvBlock(nn.Module):
         self.residual = residual
         self.attention = attention
 
-        self.num_ch = num_ch
+        self.in_ch = in_ch
+        self.out_ch = out_ch
         self.expand_ratio = expand_ratio
-        hid_ch = num_ch * expand_ratio
+        hid_ch = in_ch * expand_ratio
 
-        self.pwconv1 = ConvLayer(num_ch, hid_ch, ksize=1, bias=bias, act=act)
+        self.pwconv1 = ConvLayer(in_ch, hid_ch, ksize=1, bias=bias, act=act)
         self.dwconv = ConvLayer(hid_ch,
                                 hid_ch,
                                 ksize=ksize,
                                 groups=hid_ch,
                                 bias=bias,
                                 act=act)
-        self.pwconv2 = ConvLayer(hid_ch, num_ch, ksize=1, bias=bias, act=None)
+        self.pwconv2 = ConvLayer(hid_ch, out_ch, ksize=1, bias=bias, act=None)
+
+        self.shortcut = ConvLayer(
+            in_ch, out_ch, ksize=1, bias=bias,
+            act=None) if in_ch != out_ch else nn.Identity()
 
     def forward(self, x):
         if self.residual:
@@ -247,36 +255,45 @@ class SepConvBlock(nn.Module):
         x = self.pwconv2(x)
 
         if self.residual:
-            x += res
+            x += self.shortcut(res)
 
-        return x
+        return F.relu(x)
 
 
-class Res2Block(nn.Module):
+class MixConvBlock(nn.Module):
     def __init__(self,
-                 num_ch,
+                 in_ch,
+                 out_ch,
                  width,
                  scale=4,
                  bias=False,
                  act='relu',
                  residual=True,
                  attention=False):
-        super(Res2Block, self).__init__()
+        super(MixConvBlock, self).__init__()
         self.residual = residual
         self.attention = attention
 
-        self.num_ch = num_ch
+        self.in_ch = in_ch
+        self.out_ch = out_ch
         self.width = width
         self.scale = scale
         hid_ch = width * scale
 
-        self.pwconv1 = ConvLayer(num_ch, hid_ch, ksize=1, bias=bias, act=act)
-        self.num_convs = scale - 1 if scale > 1 else 1
-        self.convs = nn.ModuleList([
-            ConvLayer(width, width, bias=bias, act=act)
-            for _ in range(self.num_convs)
+        self.pwconv1 = ConvLayer(in_ch, hid_ch, ksize=1, bias=bias, act=act)
+        self.dwconvs = nn.ModuleList([
+            ConvLayer(width,
+                      width,
+                      ksize=2 * i + 1,
+                      groups=width,
+                      bias=bias,
+                      act=act) for i in range(scale)
         ])
-        self.pwconv2 = ConvLayer(hid_ch, num_ch, ksize=1, bias=bias, act=None)
+        self.pwconv2 = ConvLayer(hid_ch, out_ch, ksize=1, bias=bias, act=None)
+
+        self.shortcut = ConvLayer(
+            in_ch, out_ch, ksize=1, bias=bias,
+            act=None) if in_ch != out_ch else nn.Identity()
 
     def forward(self, x):
         if self.residual:
@@ -290,14 +307,11 @@ class Res2Block(nn.Module):
         xs = torch.chunk(x, self.scale, dim=1)
 
         if self.scale > 1:
-            y = 0
-            for i in range(self.num_convs):
-                y += xs[i]
-                y = self.convs[i](y)
+            for i in range(self.scale):
+                y = self.dwconvs[i](xs[i])
                 out = concat_fusion((out, y)) if i > 0 else y
-            out = concat_fusion((out, xs[-1]))
         else:
-            out = self.convs[0](xs[0])
+            out = self.dwconvs[0](xs[0])
 
         if self.attention:
             out *= att
@@ -305,9 +319,74 @@ class Res2Block(nn.Module):
         out = self.pwconv2(out)
 
         if self.residual:
-            out += res
+            out += self.shortcut(res)
 
-        return out
+        return F.relu(out)
+
+
+class Res2ConvBlock(nn.Module):
+    def __init__(self,
+                 in_ch,
+                 out_ch,
+                 width,
+                 scale=4,
+                 bias=False,
+                 act='relu',
+                 residual=True,
+                 attention=False):
+        super(Res2ConvBlock, self).__init__()
+        self.residual = residual
+        self.attention = attention
+
+        self.in_ch = in_ch
+        self.out_ch = out_ch
+        self.width = width
+        self.scale = scale
+        hid_ch = width * scale
+
+        self.pwconv1 = ConvLayer(in_ch, hid_ch, ksize=1, bias=bias, act=act)
+        self.dwconvs = nn.ModuleList([
+            ConvLayer(width,
+                      width,
+                      ksize=3 if i > 0 else 1,
+                      groups=width,
+                      bias=bias,
+                      act=act) for i in range(scale)
+        ])
+        self.pwconv2 = ConvLayer(hid_ch, out_ch, ksize=1, bias=bias, act=None)
+
+        self.shortcut = ConvLayer(
+            in_ch, out_ch, ksize=1, bias=bias,
+            act=None) if in_ch != out_ch else nn.Identity()
+
+    def forward(self, x):
+        if self.residual:
+            res = x.clone()
+
+        x = self.pwconv1(x)
+
+        if self.attention:
+            att = x.clone()
+
+        xs = torch.chunk(x, self.scale, dim=1)
+
+        if self.scale > 1:
+            for i in range(self.scale):
+                y = y + xs[i] if i > 1 else xs[i]
+                y = self.dwconvs[i](y)
+                out = concat_fusion((out, y)) if i > 0 else y
+        else:
+            out = self.dwconvs[0](xs[0])
+
+        if self.attention:
+            out *= att
+
+        out = self.pwconv2(out)
+
+        if self.residual:
+            out += self.shortcut(res)
+
+        return F.relu(out)
 
 
 class MLP(nn.Module):
@@ -319,7 +398,7 @@ class MLP(nn.Module):
 
         self.fc1 = ConvLayer(num_ch, hid_ch, ksize=1, bias=bias, act=act)
         self.drop1 = nn.Dropout(drop)
-        self.fc2 = ConvLayer(hid_ch, num_ch, ksize=1, bias=bias, act=None)
+        self.fc2 = ConvLayer(hid_ch, num_ch, ksize=1, bias=bias, act=act)
         self.drop2 = nn.Dropout(drop)
 
     def forward(self, x):
@@ -374,27 +453,29 @@ class LayerNorm(nn.Module):
 
 class MetaFormerBlock(nn.Module):
     def __init__(self,
-                 num_ch,
+                 in_ch,
+                 out_ch,
                  token_mixer=nn.Identity,
                  norm_layer=LayerNorm,
                  layer_scale=None,
                  res_scale=None,
                  drop=0.0):
         super(MetaFormerBlock, self).__init__()
-        self.num_ch = num_ch
+        self.in_ch = in_ch
+        self.out_ch = out_ch
 
-        self.norm1 = norm_layer(num_ch)
-        self.token_mixer = token_mixer(num_ch)
+        self.norm1 = norm_layer(in_ch)
+        self.token_mixer = token_mixer(in_ch, out_ch)
         self.layer_scale1 = Scale(
-            num_ch, layer_scale) if layer_scale else nn.Identity()
-        self.res_scale1 = Scale(num_ch,
+            out_ch, layer_scale) if layer_scale else nn.Identity()
+        self.res_scale1 = Scale(out_ch,
                                 res_scale) if res_scale else nn.Identity()
 
-        self.norm2 = norm_layer(num_ch)
-        self.mlp = MLP(num_ch, drop=drop)
+        self.norm2 = norm_layer(out_ch)
+        self.mlp = MLP(out_ch, drop=drop)
         self.layer_scale2 = Scale(
-            num_ch, layer_scale) if layer_scale else nn.Identity()
-        self.res_scale2 = Scale(num_ch,
+            out_ch, layer_scale) if layer_scale else nn.Identity()
+        self.res_scale2 = Scale(out_ch,
                                 res_scale) if res_scale else nn.Identity()
 
     def forward(self, x):
@@ -407,34 +488,60 @@ class MetaFormerBlock(nn.Module):
 
 class ConvFormerBlock(MetaFormerBlock):
     def __init__(self,
-                 num_ch,
-                 norm_layer=nn.BatchNorm2d,
+                 in_ch,
+                 out_ch,
+                 norm_layer=LayerNorm,
                  layer_scale=None,
                  res_scale=None):
-        super(ConvFormerBlock, self).__init__(num_ch,
+        super(ConvFormerBlock, self).__init__(in_ch,
+                                              out_ch,
                                               norm_layer=norm_layer,
                                               layer_scale=layer_scale,
                                               res_scale=res_scale)
-        self.token_mixer = SepConvBlock(num_ch,
+        self.token_mixer = SepConvBlock(in_ch,
+                                        out_ch,
+                                        residual=False,
+                                        attention=False)
+
+
+class MixFormerBlock(MetaFormerBlock):
+    def __init__(self,
+                 in_ch,
+                 out_ch,
+                 width,
+                 norm_layer=LayerNorm,
+                 layer_scale=None,
+                 res_scale=None):
+        super(MixFormerBlock, self).__init__(in_ch,
+                                             out_ch,
+                                             norm_layer=norm_layer,
+                                             layer_scale=layer_scale,
+                                             res_scale=res_scale)
+        self.token_mixer = MixConvBlock(in_ch,
+                                        out_ch,
+                                        width,
                                         residual=False,
                                         attention=False)
 
 
 class Res2FormerBlock(MetaFormerBlock):
     def __init__(self,
-                 num_ch,
+                 in_ch,
+                 out_ch,
                  width,
-                 norm_layer=nn.BatchNorm2d,
+                 norm_layer=LayerNorm,
                  layer_scale=None,
                  res_scale=None):
-        super(Res2FormerBlock, self).__init__(num_ch,
+        super(Res2FormerBlock, self).__init__(in_ch,
+                                              out_ch,
                                               norm_layer=norm_layer,
                                               layer_scale=layer_scale,
                                               res_scale=res_scale)
-        self.token_mixer = Res2Block(num_ch,
-                                     width,
-                                     residual=False,
-                                     attention=False)
+        self.token_mixer = Res2ConvBlock(in_ch,
+                                         out_ch,
+                                         width,
+                                         residual=False,
+                                         attention=False)
 
 
 class TransitionBlock(nn.Module):
@@ -446,17 +553,13 @@ class TransitionBlock(nn.Module):
         if down_mode == 'stride':
             self.layers = nn.Sequential(
                 ConvLayer(in_ch, out_ch, ksize=1),
-                ConvLayer(out_ch,
-                          out_ch,
-                          stride=stride,
-                          groups=out_ch,
-                          norm='bn'),
+                ConvLayer(out_ch, out_ch, stride=stride, groups=out_ch),
             )
 
         elif down_mode == 'maxpool':
             self.layers = nn.Sequential(
                 nn.MaxPool2d(2, 2),
-                ConvLayer(in_ch, out_ch, ksize=1, norm='bn'),
+                ConvLayer(in_ch, out_ch, ksize=1),
             )
 
     def forward(self, x):
@@ -515,15 +618,15 @@ class RFN(nn.Module):
 class NestEncoder(nn.Module):
     def __init__(self, block, in_ch, out_ch, down_mode='stride'):
         super(NestEncoder, self).__init__()
-        self.ECB2_1 = block(in_ch[1] + in_ch[0], out_ch[1])
-        self.ECB3_1 = block(in_ch[2] + in_ch[1], in_ch[2] * 2)
-        self.ECB4_1 = block(in_ch[3] + in_ch[2], in_ch[3] * 2)
+        self.EB2_1 = block(in_ch[1] + in_ch[0], out_ch[1])
+        self.EB3_1 = block(in_ch[2] + in_ch[1], in_ch[2] * 2)
+        self.EB4_1 = block(in_ch[3] + in_ch[2], in_ch[3] * 2)
 
-        self.ECB3_2 = block(in_ch[2] * 3 + out_ch[1], out_ch[2])
-        self.ECB4_2 = block(in_ch[3] * 3 + in_ch[2] * 2,
-                            in_ch[3] * 4 + in_ch[2])
+        self.EB3_2 = block(in_ch[2] * 3 + out_ch[1], out_ch[2])
+        self.EB4_2 = block(in_ch[3] * 3 + in_ch[2] * 2,
+                           in_ch[3] * 4 + in_ch[2])
 
-        self.ECB4_3 = block(in_ch[3] * 7 + in_ch[2] + out_ch[2], out_ch[3])
+        self.EB4_3 = block(in_ch[3] * 7 + in_ch[2] + out_ch[2], out_ch[3])
 
         if down_mode == 'stride':
             self.down1 = ConvLayer(out_ch[1], out_ch[1], stride=2)
@@ -536,103 +639,165 @@ class NestEncoder(nn.Module):
             self.down3 = nn.MaxPool2d(2, 2)
 
     def forward(self, feats):
-        x2_1 = self.ECB2_1(concat_fusion(feats[1]))
-        x3_1 = self.ECB3_1(concat_fusion(feats[2]))
-        x4_1 = self.ECB4_1(concat_fusion(feats[3]))
+        x2_1 = self.EB2_1(concat_fusion(feats[1]))
+        x3_1 = self.EB3_1(concat_fusion(feats[2]))
+        x4_1 = self.EB4_1(concat_fusion(feats[3]))
 
-        x3_2 = self.ECB3_2(concat_fusion(
-            (feats[2][0], x3_1, self.down1(x2_1))))
-        x4_2 = self.ECB4_2(concat_fusion(
-            (feats[3][0], x4_1, self.down2(x3_1))))
+        x3_2 = self.EB3_2(concat_fusion((feats[2][0], x3_1, self.down1(x2_1))))
+        x4_2 = self.EB4_2(concat_fusion((feats[3][0], x4_1, self.down2(x3_1))))
 
-        x4_3 = self.ECB4_3(
+        x4_3 = self.EB4_3(
             concat_fusion((feats[3][0], x4_1, x4_2, self.down3(x3_2))))
 
         return feats[0], x2_1, x3_2, x4_3
 
 
 class NestDecoder(nn.Module):
+    '''U-Net++: Nested Connections'''
     def __init__(self, block, num_ch, up_mode='bilinear'):
         super(NestDecoder, self).__init__()
-        self.DCB1_1 = block(num_ch[0] + num_ch[1], num_ch[0])
-        self.DCB2_1 = block(num_ch[1] + num_ch[2], num_ch[1])
-        self.DCB3_1 = block(num_ch[2] + num_ch[3], num_ch[2])
+        self.DB1_1 = block(num_ch[0] + num_ch[1], num_ch[0])
+        self.DB2_1 = block(num_ch[1] + num_ch[2], num_ch[1])
+        self.DB3_1 = block(num_ch[2] + num_ch[3], num_ch[2])
 
-        self.DCB1_2 = block(num_ch[0] * 2 + num_ch[1], num_ch[0])
-        self.DCB2_2 = block(num_ch[1] * 2 + num_ch[2], num_ch[1])
+        self.DB1_2 = block(num_ch[0] * 2 + num_ch[1], num_ch[0])
+        self.DB2_2 = block(num_ch[1] * 2 + num_ch[2], num_ch[1])
 
-        self.DCB1_3 = block(num_ch[0] * 3 + num_ch[1], num_ch[0])
+        self.DB1_3 = block(num_ch[0] * 3 + num_ch[1], num_ch[0])
 
         self.up = Upsample(up_mode, 2)
 
     def forward(self, feats):
-        x1_1 = self.DCB1_1(
+        x1_1 = self.DB1_1(
             concat_fusion((feats[0], self.up(feats[1], feats[0].shape))))
-        x2_1 = self.DCB2_1(
+        x2_1 = self.DB2_1(
             concat_fusion((feats[1], self.up(feats[2], feats[1].shape))))
-        x3_1 = self.DCB3_1(
+        x3_1 = self.DB3_1(
             concat_fusion((feats[2], self.up(feats[3], feats[2].shape))))
 
-        x1_2 = self.DCB1_2(
+        x1_2 = self.DB1_2(
             concat_fusion((feats[0], x1_1, self.up(x2_1, x1_1.shape))))
-        x2_2 = self.DCB2_2(
+        x2_2 = self.DB2_2(
             concat_fusion((feats[1], x2_1, self.up(x3_1, x2_1.shape))))
 
-        x1_3 = self.DCB1_3(
+        x1_3 = self.DB1_3(
             concat_fusion((feats[0], x1_1, x1_2, self.up(x2_2, x1_2.shape))))
 
         return x1_3
 
 
+class LSDecoder(nn.Module):
+    '''U-Net: Long Skip Connections'''
+    def __init__(self, block, num_ch, up_mode='bilinear'):
+        super(LSDecoder, self).__init__()
+        self.DB1 = block(num_ch[0] + num_ch[1], num_ch[0])
+        self.DB2 = block(num_ch[1] + num_ch[2], num_ch[1])
+        self.DB3 = block(num_ch[2] + num_ch[3], num_ch[2])
+
+        self.up = Upsample(up_mode, 2)
+
+    def forward(self, feats):
+        y3 = self.DB3(
+            concat_fusion((feats[2], self.up(feats[3], feats[2].shape))))
+        y2 = self.DB2(concat_fusion((feats[1], self.up(y3, feats[1].shape))))
+        y1 = self.DB1(concat_fusion((feats[0], self.up(y2, feats[0].shape))))
+
+        return y1
+
+
 class FSDecoder(nn.Module):
+    '''U-Net 3+: Full-scale Skip Connections'''
     def __init__(self, block, num_ch, up_mode='bilinear'):
         super(FSDecoder, self).__init__()
-        self.DB1 = block(128, num_ch[0])
-        self.DB2 = block(128, num_ch[1])
-        self.DB3 = block(128, num_ch[2])
+        # hid_ch = 32
+        # cat_ch = hid_ch * 4
+        cat_ch = num_ch[0] + num_ch[1] + num_ch[2] + num_ch[3]
 
-        self.down1 = nn.MaxPool2d(2, 2)
-        self.down2 = nn.MaxPool2d(4, 4)
+        self.DB1 = block(cat_ch, num_ch[0])
+        self.DB2 = block(cat_ch, num_ch[1])
+        self.DB3 = block(cat_ch, num_ch[2])
 
-        self.down1_2 = ConvLayer(num_ch[0], 32, ksize=1)
-        self.down1_3 = ConvLayer(num_ch[0], 32, ksize=1)
-        self.down2_3 = ConvLayer(num_ch[1], 32, ksize=1)
+        # self.down1_2 = ConvLayer(num_ch[0], hid_ch, ksize=1)
+        # self.down1_3 = ConvLayer(num_ch[0], hid_ch, ksize=1)
+        # self.down2_3 = ConvLayer(num_ch[1], hid_ch, ksize=1)
 
-        self.lateral1 = ConvLayer(num_ch[0], 32, ksize=1)
-        self.lateral2 = ConvLayer(num_ch[1], 32, ksize=1)
-        self.lateral3 = ConvLayer(num_ch[2], 32, ksize=1)
+        # self.lateral1 = ConvLayer(num_ch[0], hid_ch, ksize=1)
+        # self.lateral2 = ConvLayer(num_ch[1], hid_ch, ksize=1)
+        # self.lateral3 = ConvLayer(num_ch[2], hid_ch, ksize=1)
+
+        # self.up4_3 = ConvLayer(num_ch[3], hid_ch, ksize=1)
+        # self.up4_2 = ConvLayer(num_ch[3], hid_ch, ksize=1)
+        # self.up4_1 = ConvLayer(num_ch[3], hid_ch, ksize=1)
+        # self.up3_2 = ConvLayer(num_ch[2], hid_ch, ksize=1)
+        # self.up3_1 = ConvLayer(num_ch[2], hid_ch, ksize=1)
+        # self.up2_1 = ConvLayer(num_ch[1], hid_ch, ksize=1)
+
+        self.down1 = Downsample(2, 2)
+        self.down2 = Downsample(4, 4)
 
         self.up1 = Upsample(up_mode, 2)
         self.up2 = Upsample(up_mode, 4)
         self.up3 = Upsample(up_mode, 8)
 
-        self.up4_3 = ConvLayer(num_ch[3], 32, ksize=1)
-        self.up4_2 = ConvLayer(num_ch[3], 32, ksize=1)
-        self.up4_1 = ConvLayer(num_ch[3], 32, ksize=1)
-        self.up3_2 = ConvLayer(num_ch[2], 32, ksize=1)
-        self.up3_1 = ConvLayer(num_ch[2], 32, ksize=1)
-        self.up2_1 = ConvLayer(num_ch[1], 32, ksize=1)
-
     def forward(self, feats):
-        x1_1 = self.down1_3(self.down2(feats[0]))
-        x2_1 = self.down2_3(self.down1(feats[1]))
-        x3_1 = self.lateral3(feats[2])
-        x4_1 = self.up4_3(self.up1(feats[3], feats[2].shape))
-        y3 = self.DB3(concat_fusion((x1_1, x2_1, x3_1, x4_1)))
+        x1_3 = self.down2(feats[0], feats[2].shape)
+        x2_3 = self.down1(feats[1], feats[2].shape)
+        x4_3 = self.up1(feats[3], feats[2].shape)
+        y3 = self.DB3(concat_fusion((x1_3, x2_3, feats[2], x4_3)))
 
-        x1_2 = self.down1_2(self.down1(feats[0]))
-        x2_2 = self.lateral2(feats[1])
-        x3_2 = self.up3_2(self.up1(y3, feats[1].shape))
-        x4_2 = self.up4_2(self.up2(feats[3], feats[1].shape))
-        y2 = self.DB2(concat_fusion((x1_2, x2_2, x3_2, x4_2)))
+        x1_2 = self.down1(feats[0], feats[1].shape)
+        x3_2 = self.up1(y3, feats[1].shape)
+        x4_2 = self.up2(feats[3], feats[1].shape)
+        y2 = self.DB2(concat_fusion((x1_2, feats[1], x3_2, x4_2)))
 
-        x1_3 = self.lateral1(feats[0])
-        x2_3 = self.up2_1(self.up1(y2, feats[0].shape))
-        x3_3 = self.up3_1(self.up2(y3, feats[0].shape))
-        x4_3 = self.up4_1(self.up3(feats[3], feats[0].shape))
-        y1 = self.DB1(concat_fusion((x1_3, x2_3, x3_3, x4_3)))
+        x2_1 = self.up1(y2, feats[0].shape)
+        x3_1 = self.up2(y3, feats[0].shape)
+        x4_1 = self.up3(feats[3], feats[0].shape)
+        y1 = self.DB1(concat_fusion((feats[0], x2_1, x3_1, x4_1)))
+
+        # x1_3 = self.down1_3(self.down2(feats[0], feats[2].shape))
+        # x2_3 = self.down2_3(self.down1(feats[1], feats[2].shape))
+        # x3_3 = self.lateral3(feats[2])
+        # x4_3 = self.up4_3(self.up1(feats[3], feats[2].shape))
+        # y3 = self.DB3(concat_fusion((x1_3, x2_3, x3_3, x4_3)))
+
+        # x1_2 = self.down1_2(self.down1(feats[0], feats[1].shape))
+        # x2_2 = self.lateral2(feats[1])
+        # x3_2 = self.up3_2(self.up1(y3, feats[1].shape))
+        # x4_2 = self.up4_2(self.up2(feats[3], feats[1].shape))
+        # y2 = self.DB2(concat_fusion((x1_2, x2_2, x3_2, x4_2)))
+
+        # x1_1 = self.lateral1(feats[0])
+        # x2_1 = self.up2_1(self.up1(y2, feats[0].shape))
+        # x3_1 = self.up3_1(self.up2(y3, feats[0].shape))
+        # x4_1 = self.up4_1(self.up3(feats[3], feats[0].shape))
+        # y1 = self.DB1(concat_fusion((x1_1, x2_1, x3_1, x4_1)))
 
         return y1
+
+
+class Downsample(nn.Module):
+    def __init__(self, kernel_size=2, stride=2):
+        super(Downsample, self).__init__()
+        self.down = nn.MaxPool2d(kernel_size, stride)
+
+    def forward(self, feat, shape):
+        out = self.down(feat)
+
+        if out.shape != shape:
+            out = self._pad(out, shape)
+
+        return out
+
+    @staticmethod
+    def _pad(feat, shape):
+        pad_h = shape[-2] - feat.shape[-2]
+        pad_w = shape[-1] - feat.shape[-1]
+        pad_h1, pad_w1 = pad_h // 2, pad_w // 2
+        pad_h2, pad_w2 = pad_h - pad_h1, pad_w - pad_w1
+        padding = (pad_w1, pad_w2, pad_h1, pad_h2)
+
+        return nn.ReflectionPad2d(padding)(feat)
 
 
 class Upsample(nn.Module):

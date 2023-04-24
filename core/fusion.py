@@ -47,12 +47,16 @@ def attention_fusion(tensor1,
     f_spatial = spatial_fusion(tensor1, tensor2, spatial_mode, softmax=False)
     f_channel = channel_fusion(tensor1, tensor2, channel_mode, softmax=False)
 
-    if mode == 'mean':
+    if mode == 'sa':
+        return f_spatial
+    elif mode == 'ca':
+        return f_channel
+    elif mode == 'mean':
         return element_fusion(f_spatial, f_channel, mode)
     elif mode == 'wavg':
         return weighted_fusion(f_spatial, f_channel, f_spatial, f_channel)
     else:
-        raise ValueError("only supported ['mean', 'wavg'] mode")
+        raise ValueError("only supported ['sa', 'ca', 'mean', 'wavg'] mode")
 
 
 def spatial_fusion(tensor1, tensor2, mode='l1', softmax=True):
@@ -88,31 +92,61 @@ def spatial_pooling(tensor, mode='l1'):
         return tensor.norm(p=2, dim=1, keepdim=True)
     elif mode == 'linf':
         return tensor.max(dim=1, keepdim=True)[0]
+
+    elif mode == 'nl':
+        b, c, h, w = tensor.shape
+
+        q = tensor.view(b, c, -1).permute(0, 2, 1)  # [B,(HW),C]
+        k = F.avg_pool2d(tensor, 8, 8).view(b, c, -1)  # [B,C,(HW//64)]
+        energy = torch.bmm(q, k)  # [B,(HW),(HW//64)]
+
+        energy_min = torch.min(energy)
+        energy_max = torch.max(energy)
+        energy_norm = (energy - energy_min) / (energy_max - energy_min)
+        energy_softmax = F.softmax(energy_norm, dim=-1)
+
+        v = F.avg_pool2d(tensor, 8,
+                         8).view(b, c, -1).permute(0, 2, 1)  # [B,(HW//64),C]
+        att = torch.bmm(energy_softmax, v)  # [B,(HW),C]
+
+        return att.permute(0, 2, 1).view(b, c, h, w) + tensor
+
     else:
         raise ValueError(
-            "only supported ['sum', 'mean', 'l1', 'l2', 'linf'] mode")
+            "only supported ['sum', 'mean', 'l1', 'l2', 'linf', 'nl'] mode")
 
 
 def channel_pooling(tensor, mode='avg'):
-    h, w = tensor.shape[-2:]
+    b, c, h, w = tensor.shape
 
     if mode == 'avg':
         return F.avg_pool2d(tensor, kernel_size=(h, w))
     elif mode == 'max':
         return F.max_pool2d(tensor, kernel_size=(h, w))
+
     elif mode == 'nuclear':
-        return _nuclear_pooling(tensor)
+        vector = torch.zeros(1, c, 1, 1).to(tensor.device, non_blocking=True)
+
+        for i in range(c):
+            s = torch.svd(tensor[0, i].clamp(min=eps))[1]
+            vector[0, i] = torch.sum(s)
+
+        return vector
+
+    elif mode == 'nl':
+        q = tensor.view(b, c, -1)  #[B,C,(HW)]
+        k = tensor.view(b, c, -1).permute(0, 2, 1)  #[B,(HW),C]
+        energy = torch.bmm(q, k)  #[B,C,C]
+
+        energy_min = torch.min(energy)
+        energy_max = torch.max(energy)
+        energy_norm = (energy - energy_min) / (energy_max - energy_min)
+        energy_softmax = F.softmax(energy_norm, dim=-1)
+
+        v = tensor.view(b, c, -1)  #[B,C,(HW)]
+        att = torch.bmm(energy_softmax, v)  #[B,C,(HW)]
+
+        return att.view(b, c, h, w) + tensor
+
     else:
-        raise ValueError("only supported ['avg', 'max', 'nuclear'] mode")
-
-
-def _nuclear_pooling(tensor):
-    channel = tensor.shape[1]
-    vectors = torch.zeros(1, channel, 1, 1).to(tensor.device,
-                                               non_blocking=True)
-
-    for i in range(channel):
-        s = torch.svd(tensor[0, i].clamp(min=eps))[1]
-        vectors[0, i] = torch.sum(s)
-
-    return vectors
+        raise ValueError("only supported ['avg', 'max', 'nuclear', 'nl'] mode")

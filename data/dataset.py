@@ -28,7 +28,7 @@ img_size = 256
 class FusionDataset(Dataset):
     def __init__(self,
                  root_dir,
-                 set_name,
+                 set_name=None,
                  set_type='train',
                  img_type='ir',
                  norm=None,
@@ -62,7 +62,7 @@ class FusionDataset(Dataset):
         imgs = tuple(map(partial(norm, mode=self.norm), imgs))
 
         if self.transform:
-            idx = np.random.choice(4)
+            idx = np.random.choice(2)
             imgs = tuple(map(partial(transform, mode=idx), imgs))
 
         imgs = tuple(
@@ -74,9 +74,11 @@ class FusionDataset(Dataset):
 
             min_size = min(imgs.shape[-2:])
             if min_size < img_size:
+                # imgs = tf.CenterCrop(min_size)(imgs)
                 imgs = tf.RandomCrop(min_size)(imgs)
                 imgs = tf.Resize(img_size)(imgs)
             else:
+                # imgs = tf.CenterCrop(img_size)(imgs)
                 imgs = tf.RandomCrop(img_size)(imgs)
 
             return imgs[0], imgs[1]
@@ -95,7 +97,7 @@ class FusionDataset(Dataset):
         else:
             img_dir = os.path.join(self.root_dir, self.set_name, 'vi')
 
-        for img in os.listdir(img_dir):
+        for img in sorted(os.listdir(img_dir)):
             if img.endswith('.bmp') or img.endswith('.jpg') or img.endswith(
                     '.png'):
                 img_path1 = os.path.join(img_dir, img)
@@ -107,14 +109,15 @@ class FusionDataset(Dataset):
                     img_info1.append(img_path1)
                     img_info2.append(img_path2)
 
-        if self.set_name is None:
+        if self.set_name is None and self.set_type in ['train', 'valid']:
             train_img_path1, valid_img_path1, train_img_path2, valid_img_path2 = train_test_split(
                 img_info1, img_info2, test_size=0.2, random_state=0)
             self.train_data_info = list(zip(train_img_path1, train_img_path2))
             self.valid_data_info = list(zip(valid_img_path1, valid_img_path2))
         else:
             self.data_info = list(zip(img_info1, img_info2))
-            random.shuffle(self.data_info)
+            if self.set_type in ['train', 'valid']:
+                random.shuffle(self.data_info)
 
 
 class AEDataset(Dataset):
@@ -147,9 +150,11 @@ class AEDataset(Dataset):
         if self.fix_size:
             min_size = min(img.shape[-2:])
             if min_size < img_size:
+                # img = tf.CenterCrop(min_size)(img)
                 img = tf.RandomCrop(min_size)(img)
                 img = tf.Resize(img_size)(img)
             else:
+                # img = tf.CenterCrop(img_size)(img)
                 img = tf.RandomCrop(img_size)(img)
 
         return img
@@ -164,13 +169,13 @@ class AEDataset(Dataset):
         assert self.img_type in ['ir', 'po']
         img_dir2 = img_dir1.replace('vi', self.img_type)
 
-        for img in os.listdir(img_dir1):
+        for img in sorted(os.listdir(img_dir1)):
             if img.endswith('.bmp') or img.endswith('.jpg') or img.endswith(
                     '.png'):
                 img_path = os.path.join(img_dir1, img)
                 self.data_info.append(img_path)
 
-        for img in os.listdir(img_dir2):
+        for img in sorted(os.listdir(img_dir2)):
             if img.endswith('.bmp') or img.endswith('.jpg') or img.endswith(
                     '.png'):
                 img_path = os.path.join(img_dir2, img)
@@ -196,7 +201,7 @@ if __name__ == '__main__':
     if flag == 0:
         train_path = os.path.join(BASE_DIR, 'samples')
         train_set = FusionDataset(train_path,
-                                  'train',
+                                  set_name='train',
                                   img_type='po',
                                   norm='min-max',
                                   transform=True,

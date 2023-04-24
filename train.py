@@ -9,20 +9,20 @@
 import os
 import sys
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '4,5,6,7'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.join(BASE_DIR, '..'))
 
 import argparse
 import time
-from datetime import datetime
 
 import cv2
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 from common import *
+from core.block import *
 from core.loss import GradLoss, PixelLoss, SSIMLoss
 from core.model import *
 from data.dataset import FusionDataset as Dataset
@@ -38,7 +38,7 @@ def get_args():
     parser = argparse.ArgumentParser(description='Training')
     parser.add_argument('--lr', default=1e-4, type=float, help='learning rate')
     parser.add_argument('--bs', default=4, type=int, help='batch size')
-    parser.add_argument('--epoch', default=12, type=int, help='num of epochs')
+    parser.add_argument('--epoch', default=36, type=int, help='num of epochs')
     parser.add_argument('--use_patches',
                         default=False,
                         type=bool,
@@ -73,19 +73,16 @@ def train_model(model,
                 loss_fn2,
                 loss_fn3,
                 epoch,
-                writer,
-                device,
                 mode='train',
-                optimizer=None,
                 save_dir=None):
-    if torch.cuda.is_available():
-        torch.cuda.synchronize(device)
-    start_time = time.time()
-
     loss = AverageMeter()
 
     epoch_idx = epoch + 1
     num_iters = len(data_loader)
+
+    if torch.cuda.is_available():
+        torch.cuda.synchronize(device)
+    start_time = time.time()
 
     for iter, (img1, img2) in enumerate(data_loader):
         iter_idx = iter + 1
@@ -102,8 +99,7 @@ def train_model(model,
             loss3 = loss_fn3(img1, img2, pred, mode='avg')
             # loss2 = loss_fn2(img1, img2, pred, mode='max')
             # loss3 = loss_fn3(img1, img2, pred, mode='max')
-            total_loss = loss1 + loss2
-            # total_loss = loss1 + loss2 + loss3
+            total_loss = loss1 + loss2 + loss3
 
             total_loss.backward()
             if args.clip_grad:
@@ -124,8 +120,7 @@ def train_model(model,
                 loss3 = loss_fn3(img1, img2, pred, mode='avg')
                 # loss2 = loss_fn2(img1, img2, pred, mode='max')
                 # loss3 = loss_fn3(img1, img2, pred, mode='max')
-                total_loss = loss1 + loss2
-                # total_loss = loss1 + loss2 + loss3
+                total_loss = loss1 + loss2 + loss3
 
         if is_distributed:
             total_loss = reduce_value(total_loss, args.local_world_size)
@@ -148,24 +143,22 @@ def train_model(model,
                                   global_step)
 
             if iter_idx % 10 == 0:
-                print('epoch: {:0>2}, iter: {:0>3}, {} loss: {:.4f}'.format(
-                    epoch_idx, iter_idx, mode, loss.avg))
+                logger.info(
+                    'epoch: {:0>2}, iter: {:0>3}, {} loss: {:.4f}'.format(
+                        epoch_idx, iter_idx, mode, loss.avg))
 
     if torch.cuda.is_available():
         torch.cuda.synchronize(device)
     cost_time = time.time() - start_time
 
     if local_rank == 0:
-        print('\ncost time: {:.0f}m:{:.0f}s\n'.format(cost_time // 60,
-                                                      cost_time % 60))
+        logger.info('cost time: {:.3f}s\n'.format(cost_time))
 
         if save_dir is not None:
-            stride = len(pred) // 4 if len(pred) > 8 else len(pred) // 2
-
-            for i in range(0, len(pred), stride):
-                result = save_result(pred[i], img1[i], img2[i])
-                file_name = '{:0>2}_{:0>2}.png'.format(epoch_idx, i + 1)
-                cv2.imwrite(os.path.join(save_dir, file_name), result)
+            result = save_result(pred[0], img1[0], img2[0])
+            # result = save_result(pred[0])
+            file_name = '{:0>2}.png'.format(epoch_idx)
+            cv2.imwrite(os.path.join(save_dir, file_name), result)
 
     if is_distributed:
         dist.barrier()
@@ -178,17 +171,19 @@ if __name__ == '__main__':
     torch.cuda.empty_cache()
     setup_seed(seed=0, deterministic=False)
 
+    ckpt_dir, logger = make_logger(BASE_DIR)
+
     args = get_args()
 
     lr = args.lr
     batch_size = args.bs
     num_epochs = args.epoch
     betas = (0.9, 0.999)
-    milestones = (8, 11)
+    milestones = (round(args.epoch * 2 / 3), round(args.epoch * 8 / 9))
 
     is_distributed = args.local_world_size > 1
-    print('rank: {}, wolrd size: {}'.format(args.local_rank,
-                                            args.local_world_size))
+    logger.info('rank: {}, wolrd size: {}'.format(args.local_rank,
+                                                  args.local_world_size))
 
     if is_distributed:
         setup_dist(args.local_rank, args.local_world_size)
@@ -197,13 +192,10 @@ if __name__ == '__main__':
     else:
         local_rank = args.local_rank
         device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    print('training on device: {}'.format(device))
+    logger.info('training on device: {}'.format(device))
 
     data_dir = os.path.join(BASE_DIR, '..', 'datasets', args.data)
     assert os.path.isdir(data_dir)
-
-    time_str = datetime.strftime(datetime.now(), '%Y-%m-%d_%H-%M')
-    ckpt_dir = os.path.join(BASE_DIR, '..', 'runs', time_str)
 
     if local_rank == 0:
         if not os.path.isdir(ckpt_dir):
@@ -220,17 +212,16 @@ if __name__ == '__main__':
 
     # 1. data
     if args.use_patches:
-        train_set = Patches(data_dir, 'train', transform=True)
-        valid_set = Patches(data_dir, 'valid')
+        train_set = Patches(data_dir, set_name='train', transform=True)
+        valid_set = Patches(data_dir, set_name='valid')
     else:
+        # train_set = Dataset(data_dir, set_name='train', transform=True)
+        # valid_set = Dataset(data_dir, set_name='valid')
         train_set = Dataset(data_dir,
-                            None,
                             set_type='train',
                             transform=True,
                             fix_size=True)
-        valid_set = Dataset(data_dir, None, set_type='valid', fix_size=True)
-        # train_set = Dataset(data_dir, 'train', transform=True)
-        # valid_set = Dataset(data_dir, 'valid')
+        valid_set = Dataset(data_dir, set_type='valid', fix_size=True)
 
     if is_distributed:
         train_sampler = DistributedSampler(train_set, shuffle=True)
@@ -254,9 +245,33 @@ if __name__ == '__main__':
     )
 
     # 2. model
-    model = MyFusion().to(device, non_blocking=True)
-    # model = NestFuse().to(device, non_blocking=True)
-    # model = PFNetv1().to(device, non_blocking=True)
+    # models = [
+    #     PFNetv1, PFNetv2, DeepFuse, DenseFuse, VIFNet, DBNet, SEDRFuse,
+    #     NestFuse, RFNNest, UNFusion, Res2Fusion, MAFusion, IFCNN, DIFNet, PMGI
+    # ]
+    #
+    # model = models[7]
+    # if local_rank == 0:
+    #     logger.info('model: {}'.format(model.__name__))
+    #
+    # model = model().to(device, non_blocking=True)
+
+    encoders = [
+        ConvBlock, SepConvBlock, MixConvBlock, Res2ConvBlock, ConvFormerBlock,
+        MixFormerBlock, Res2FormerBlock
+    ]
+    decoders = [NestDecoder, LSDecoder, FSDecoder]
+
+    encoder, decoder = encoders[0], decoders[0]
+    if local_rank == 0:
+        logger.info('encoder: {}, decoder: {}'.format(encoder.__name__,
+                                                      decoder.__name__))
+
+    model = MyFusion(encoder, decoder).to(device, non_blocking=True)
+
+    if local_rank == 0:
+        params = sum([param.nelement() for param in model.parameters()])
+        logger.info('params: {:.3f}M'.format(params / 1e6))
 
     if is_distributed:
         tmp_path = os.path.join(ckpt_dir, 'init_weights.pth')
@@ -275,11 +290,22 @@ if __name__ == '__main__':
     model.train()
 
     # 3. optimize
-    loss_fn1 = SSIMLoss(mode='ssim', no_luminance=False, weight=1)
-    loss_fn2 = PixelLoss(mode='l1', weight=0.01)
-    loss_fn3 = GradLoss(mode='l1', weight=0.1)
-    # loss_fn2 = PixelLoss(mode='l2', weight=0.01)
-    # loss_fn3 = GradLoss(mode='l2', weight=0.1)
+    ssim_modes = ['ssim', 'w-ssim', 'ms-ssim', 'msw-ssim']
+    norm_modes = ['l1', 'l2']
+    weights = [1.0, 0.1, 0.01, 0.0]
+
+    ssim_mode, ssim_weight = ssim_modes[0], weights[0]
+    pixel_mode, pixel_weight = norm_modes[0], weights[2]
+    grad_mode, grad_weight = norm_modes[0], weights[1]
+    if local_rank == 0:
+        logger.info('ssim mode: {}, weight: {}'.format(ssim_mode, ssim_weight))
+        logger.info('pixel mode: {}, weight: {}'.format(
+            pixel_mode, pixel_weight))
+        logger.info('grad mode: {}, weight: {}'.format(grad_mode, grad_weight))
+
+    loss_fn1 = SSIMLoss(ssim_mode, no_luminance=False, weight=ssim_weight)
+    loss_fn2 = PixelLoss(pixel_mode, weight=pixel_weight)
+    loss_fn3 = GradLoss(grad_mode, weight=grad_weight)
 
     optimizer = optim.Adam(model.parameters(), lr=lr, betas=betas)
 
@@ -295,9 +321,9 @@ if __name__ == '__main__':
         epoch_idx = epoch + 1
 
         if local_rank == 0:
-            print('Epoch: [{:0>2}/{:0>2}], lr: {:.2e}'.format(
+            logger.info('Epoch: [{:0>2}/{:0>2}], lr: {:.2e}'.format(
                 epoch_idx, num_epochs, optimizer.param_groups[0]['lr']))
-            print('-' * 16)
+            logger.info('-' * 16)
 
         if is_distributed:
             train_sampler.set_epoch(epoch)
@@ -305,14 +331,12 @@ if __name__ == '__main__':
         # 1. train
         model.train()
         train_loss = train_model(model, train_loader, loss_fn1, loss_fn2,
-                                 loss_fn3, epoch, writer, device, 'train',
-                                 optimizer, train_save_dir)
+                                 loss_fn3, epoch, 'train', train_save_dir)
 
         # 2. valid
         model.eval()
         valid_loss = train_model(model, valid_loader, loss_fn1, loss_fn2,
-                                 loss_fn3, epoch, writer, device, 'valid',
-                                 valid_save_dir)
+                                 loss_fn3, epoch, 'valid', valid_save_dir)
 
         # 3. update lr
         scheduler1.step()
@@ -321,10 +345,13 @@ if __name__ == '__main__':
             writer.add_scalar('train_loss_epoch', train_loss, epoch)
             writer.add_scalar('valid_loss_epoch', valid_loss, epoch)
 
-            print('epoch: {:0>2}, train loss: {:.4f}, valid loss: {:.4f}\n'.
-                  format(epoch_idx, train_loss, valid_loss))
+            logger.info(
+                'epoch: {:0>2}, train loss: {:.4f}, valid loss: {:.4f}\n'.
+                format(epoch_idx, train_loss, valid_loss))
 
-            if valid_loss < best_loss or epoch == 0:
+            if epoch < num_epochs // 2:
+                continue
+            elif valid_loss < best_loss or epoch == num_epochs // 2:
                 best_epoch, best_loss = epoch_idx, valid_loss
                 ckpt_path = os.path.join(ckpt_dir, 'epoch_best.pth')
 
@@ -346,8 +373,9 @@ if __name__ == '__main__':
             torch.save(model.state_dict(), ckpt_path)
 
         writer.close()
-        print('training model done, best loss: {:.4f} in epoch: {}'.format(
-            best_loss, best_epoch))
+        logger.info(
+            'training model done, best loss: {:.4f} in epoch: {}'.format(
+                best_loss, best_epoch))
 
     if is_distributed:
         dist.destroy_process_group()

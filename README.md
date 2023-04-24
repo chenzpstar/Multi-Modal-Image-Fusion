@@ -2,23 +2,26 @@
 
 This project is for personal study and under development, please click 'watch' or 'star' my repo and check back later if you are interested in it.
 
-2023.2.26 Update:
-This project was initially set up for polarization image fusion, and now it has been extended to infrared image fusion. Thus, it was renamed as multi-modal image fusion.
+> **2023.2.26 Update:**
+> This project was initially set up for polarization image fusion, and now it has been extended to infrared image fusion. Thus, it was renamed as multi-modal image fusion.
 
 ## 1 任务简述
 
-主要任务：实现多模态图像融合，包括偏振和强度图像融合，以及红外与可见光图像融合。
+主要任务：实现多模态图像融合，包括偏振与强度图像融合，以及红外与可见光图像融合。
 
 ## 2 模型
 
 本项目最初基于无监督的 PFNet 算法构建模型。
 
-论文：https://doi.org/10.1364/ol.384189
+- 论文：https://doi.org/10.1364/ol.384189
 
-代码：https://github.com/Junchao2018/Polarization-image-fusion
+- 代码：https://github.com/Junchao2018/Polarization-image-fusion
 
 另外，还包括以下算法模型：
-DeepFuse, DenseFuse, VIFNet, DBNet (Dual-Branch), SEDRFuse, NestFuse, RFN-Nest, UNFusion, IFCNN, DIFNet, PMGI
+
+- 红外：DeepFuse, DenseFuse, VIFNet, DBNet (Dual-Branch), SEDRFuse, NestFuse, RFN-Nest, UNFusion, Res2Fusion, MAFusion
+
+- 通用：IFCNN, DIFNet, PMGI
 
 ### 2.1 网络架构
 

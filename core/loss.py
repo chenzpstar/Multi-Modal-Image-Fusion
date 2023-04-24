@@ -230,8 +230,8 @@ class MSW_SSIM(nn.Module):
         ssim = 0.0
 
         for ssim_fn in self.ssim_fns:
-            out1 = ssim_fn(img1, pred)
-            out2 = ssim_fn(img2, pred)
+            out1 = ssim_fn(pred, img1)
+            out2 = ssim_fn(pred, img2)
             gamma = out1['sigma'] / (out1['sigma'] +
                                      out2['sigma']).clamp_(min=eps)
             ssim += (gamma * out1['ssim']).mean() + (
@@ -260,6 +260,15 @@ class SSIMLoss(nn.Module):
             ssim1 = ssim_fn(pred, img1)['ssim'].mean()
             ssim2 = ssim_fn(pred, img2)['ssim'].mean()
             loss = (ssim1 + ssim2) / 2.0
+
+        elif self.mode == 'w-ssim':
+            ssim_fn = SSIM(11, channel, self.val_range, self.no_luminance)
+            out1 = ssim_fn(pred, img1)
+            out2 = ssim_fn(pred, img2)
+            gamma = out1['sigma'] / (out1['sigma'] +
+                                     out2['sigma']).clamp_(min=eps)
+            loss = (gamma * out1['ssim']).mean() + (
+                (1.0 - gamma) * out2['ssim']).mean()
 
         elif self.mode == 'ms-ssim':
             msssim_fn = MS_SSIM(11, channel, self.val_range, self.no_luminance)
@@ -313,8 +322,8 @@ class GradLoss(nn.Module):
         sobel_y = torch.FloatTensor([[-1, -2, -1], [0, 0, 0],
                                      [1, 2, 1]]).reshape([1, 1, 3, 3])
 
-        grad_x = F.conv2d(img, sobel_x)
-        grad_y = F.conv2d(img, sobel_y)
+        grad_x = F.conv2d(img, sobel_x.to(img, non_blocking=True))
+        grad_y = F.conv2d(img, sobel_y.to(img, non_blocking=True))
 
         return torch.abs(grad_x) + torch.abs(grad_y)
 
@@ -382,15 +391,18 @@ if __name__ == '__main__':
 
     torch.manual_seed(0)
 
-    ssim_mode = ['ssim', 'ms-ssim', 'msw-ssim']
-    pixel_mode = ['l1', 'l2']
-    grad_mode = ['l1', 'l2']
-    tv_mode = ['l1', 'l2']
+    ssim_modes = ['ssim', 'w-ssim', 'ms-ssim', 'msw-ssim']
+    norm_modes = ['l1', 'l2']
+    weights = [1.0, 0.1, 0.01, 0.0]
 
-    loss_fn1 = SSIMLoss(ssim_mode[0], no_luminance=False, weight=1)
-    loss_fn2 = PixelLoss(pixel_mode[0], weight=0.01)
-    loss_fn3 = GradLoss(grad_mode[0], weight=0.1)
-    loss_fn4 = TVLoss(tv_mode[0])
+    ssim_mode, ssim_weight = ssim_modes[0], weights[0]
+    pixel_mode, pixel_weight = norm_modes[0], weights[2]
+    grad_mode, grad_weight = norm_modes[0], weights[1]
+
+    loss_fn1 = SSIMLoss(ssim_mode, no_luminance=False, weight=ssim_weight)
+    loss_fn2 = PixelLoss(pixel_mode, weight=pixel_weight)
+    loss_fn3 = GradLoss(grad_mode, weight=grad_weight)
+    loss_fn4 = TVLoss(norm_modes[0])
 
     x1 = torch.rand(2, 1, 224, 224)
     x2 = torch.rand(2, 1, 224, 224)

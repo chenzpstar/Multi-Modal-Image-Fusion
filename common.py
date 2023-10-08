@@ -6,6 +6,7 @@
 # @brief      : 通用函数
 """
 
+import argparse
 import logging
 import os
 import random
@@ -14,13 +15,65 @@ from datetime import datetime
 import numpy as np
 import torch
 import torch.distributed as dist
-from data.transform import denorm
 from torch.optim.lr_scheduler import _LRScheduler
+
+from data.transform import denorm
+
+
+def get_train_args():
+    parser = argparse.ArgumentParser(description='Training')
+    parser.add_argument('--lr', default=1e-4, type=float, help='learning rate')
+    parser.add_argument('--bs', default=16, type=int, help='batch size')
+    parser.add_argument('--epoch', default=12, type=int, help='num of epochs')
+    parser.add_argument('--use_patches',
+                        default=True,
+                        type=bool,
+                        help='enable to train with patches')
+    parser.add_argument('--warmup',
+                        default=False,
+                        type=bool,
+                        help='enable to warm up lr')
+    parser.add_argument('--clip_grad',
+                        default=True,
+                        type=bool,
+                        help='enable to clip grad norm')
+    parser.add_argument('--local_rank',
+                        default=0,
+                        type=int,
+                        help='node rank for distribution')
+    parser.add_argument('--local_world_size',
+                        default=1,
+                        type=int,
+                        help='num of gpus for distribution')
+    parser.add_argument('--data',
+                        default='roadscene',
+                        type=str,
+                        help='dataset folder name')
+
+    return parser.parse_args()
+
+
+def get_test_args():
+    parser = argparse.ArgumentParser(description='Inference')
+    parser.add_argument('--use_gpu',
+                        default=True,
+                        type=bool,
+                        help='enable to test on gpu')
+    parser.add_argument('--data',
+                        default='tno',
+                        type=str,
+                        help='dataset folder name')
+    parser.add_argument('--ckpt',
+                        default='2023-02-26_23-15',
+                        type=str,
+                        help='checkpoint folder name')
+
+    return parser.parse_args()
 
 
 def save_result(pred, img1=None, img2=None):
     if (img1 is not None) and (img2 is not None):
-        result = tuple(map(denorm, (img1, img2, (img1 + img2) / 2.0, pred)))
+        result = tuple(map(denorm, (img1, img2, pred)))
         result = np.concatenate(result, axis=1)
     else:
         result = denorm(pred)
@@ -32,6 +85,7 @@ def setup_seed(seed=0, benchmark=False, deterministic=True):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+    torch.use_deterministic_algorithms(deterministic, warn_only=True)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
@@ -147,7 +201,7 @@ class Logger(object):
 
 def make_logger(root_dir):
     time_str = datetime.strftime(datetime.now(), "%Y-%m-%d_%H-%M")
-    log_dir = os.path.join(root_dir, '..', 'runs', time_str)
+    log_dir = os.path.join(root_dir, '..', 'checkpoints', time_str)
 
     # 创建 logger
     log_path = os.path.join(log_dir, "train.log")

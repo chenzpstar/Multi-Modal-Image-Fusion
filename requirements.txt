@@ -1,0 +1,8 @@
+numpy
+scikit-learn
+torch
+torchvision
+opencv-python
+openpyxl
+natsort
+thop

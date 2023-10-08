@@ -21,70 +21,72 @@ __all__ = [
 eps = 1e-7
 
 
-def _gaussian_kernel(window_size, sigma=1.5):
+def _gaussian_kernel(win_size, sigma):
     gauss = torch.FloatTensor([
-        exp(-(x - window_size // 2)**2 / (2.0 * sigma**2))
-        for x in range(window_size)
+        exp(-(x - win_size // 2)**2 / (2.0 * sigma**2))
+        for x in range(win_size)
     ])
 
     return gauss / gauss.sum()
 
 
-def create_window(window_size, sigma=1.5, channel=1):
-    _1D_window = _gaussian_kernel(window_size, sigma).unsqueeze(1)
-    _2D_window = torch.mm(_1D_window, _1D_window.t()).unsqueeze(0).unsqueeze(0)
+def create_window(win_size):
+    sigma = 1.5 if win_size == 11 else 0.15 * (win_size - 1)
 
-    return _2D_window.repeat(channel, 1, 1, 1)
+    _1D_window = _gaussian_kernel(win_size, sigma).unsqueeze(1)
+    _2D_window = torch.mm(_1D_window, _1D_window.t())
+
+    return _2D_window.unsqueeze(0).unsqueeze(0)
 
 
-def _gaussian_filter(img, window, use_padding=False):
+def _gaussian_fn(img, window, use_padding=False):
     channel = img.shape[1]
-    padding = window.shape[-1] // 2 if use_padding else 0
 
-    return F.conv2d(img, window, padding=padding, groups=channel)
+    if use_padding:
+        p = window.shape[-1] // 2
+        img = F.pad(img, (p, p, p, p), 'reflect')
+
+    return F.conv2d(img, window, groups=channel)
 
 
-def _ssim(img1,
-          img2,
-          window=None,
-          window_size=11,
-          val_range=None,
-          no_luminance=False,
-          use_padding=False,
-          size_average=True):
-    # Value range can be different from 255. Other common ranges are 1 (sigmoid) and 2 (tanh).
-    if val_range is None:
-        if torch.max(img1) > 128:
-            max_val = 255
-        else:
-            max_val = 1
-
-        if torch.min(img1) < -0.5:
-            min_val = -1
-        else:
-            min_val = 0
-
+def cmpt_ssim(img1,
+              img2,
+              win_size=11,
+              window=None,
+              data_range=None,
+              use_padding=False,
+              size_average=True):
+    # Data range can be different from 255. Other common ranges are 1 (sigmoid) and 2 (tanh).
+    if data_range is None:
+        max_val = 255.0 if img1.max() > 128 else 1.0
+        min_val = -1.0 if img1.min() < -0.5 else 0.0
         L = max_val - min_val
     else:
-        L = val_range
+        L = data_range
 
     if window is None:
-        c, h, w = img1.shape[1:]
-        min_size = min(window_size, h, w)
-        window = create_window(min_size, channel=c)
+        h, w = img1.shape[-2:]
+        min_size = min(win_size, h, w)
+        window = create_window(min_size)
+        window = nn.Parameter(window, requires_grad=False)
 
     window = window.to(img1, non_blocking=True)
 
-    mu1 = _gaussian_filter(img1, window, use_padding)
-    mu2 = _gaussian_filter(img2, window, use_padding)
+    im1 = img1.clone()
+    im2 = img2.clone()
 
-    mu1_sq = mu1.pow(2)
-    mu2_sq = mu2.pow(2)
+    mu1 = _gaussian_fn(im1, window, use_padding)
+    mu2 = _gaussian_fn(im2, window, use_padding)
+
+    mu1_sq = mu1 * mu1
+    mu2_sq = mu2 * mu2
     mu1_mu2 = mu1 * mu2
 
-    sigma1_sq = _gaussian_filter(img1 * img1, window, use_padding) - mu1_sq
-    sigma2_sq = _gaussian_filter(img2 * img2, window, use_padding) - mu2_sq
-    sigma12 = _gaussian_filter(img1 * img2, window, use_padding) - mu1_mu2
+    sigma1_sq = (_gaussian_fn(im1 * im1, window, use_padding) -
+                 mu1_sq).clamp(min=0)
+    sigma2_sq = (_gaussian_fn(im2 * im2, window, use_padding) -
+                 mu2_sq).clamp(min=0)
+    sigma12 = _gaussian_fn(im1 * im2, window, use_padding) - mu1_mu2
 
     K1, K2 = 0.01, 0.03
     C1 = (K1 * L)**2
@@ -95,58 +97,65 @@ def _ssim(img1,
     v1 = 2.0 * sigma12 + C2
     v2 = sigma1_sq + sigma2_sq + C2
 
-    l = m1 / m2 if not no_luminance else 1.0
     cs = v1 / v2
-    ssim = l * cs
+    ssim = (m1 * v1) / (m2 * v2)
 
-    sigma1 = sigma1_sq.clamp(min=1e-4)
+    sigma = sigma1_sq.clamp(min=1e-4)
 
     if size_average:
         ssim = ssim.mean(dim=(1, 2, 3))
         cs = cs.mean(dim=(1, 2, 3))
-        sigma1 = sigma1.mean(dim=(1, 2, 3))
+        sigma = sigma.mean(dim=(1, 2, 3))
 
-    out = {'ssim': ssim, 'cs': cs, 'sigma': sigma1}
-
-    return out
+    return {'ssim': ssim, 'cs': cs, 'sigma': sigma}
 
 
-def _msssim(img1,
-            img2,
-            weights=None,
-            window=None,
-            window_size=11,
-            val_range=None,
-            no_luminance=False,
-            use_padding=False,
-            size_average=True):
+def cmpt_msssim(img1,
+                img2,
+                win_size=11,
+                window=None,
+                weights=None,
+                data_range=None,
+                use_padding=False,
+                size_average=True):
     if weights is None:
         weights = torch.FloatTensor([0.0448, 0.2856, 0.3001, 0.2363, 0.1333])
+        weights = nn.Parameter(weights, requires_grad=False)
 
     if window is None:
-        c, h, w = img1.shape[1:]
-        min_size = min(window_size, h, w)
-        window = create_window(min_size, channel=c)
+        h, w = img1.shape[-2:]
+        min_size = min(win_size, h, w)
+        window = create_window(min_size)
+        window = nn.Parameter(window, requires_grad=False)
 
     weights = weights.to(img1, non_blocking=True)
     window = window.to(img1, non_blocking=True)
+
+    im1 = img1.clone()
+    im2 = img2.clone()
 
     values = []
     levels = len(weights)
 
     for i in range(levels):
-        out = _ssim(img1, img2, window, window_size, val_range, no_luminance,
-                    use_padding, size_average)
+        out = cmpt_ssim(im1, im2, win_size, window, data_range, use_padding,
+                        size_average)
 
         if i < levels - 1:
             values.append(out['cs'])
-            img1 = F.avg_pool2d(img1, 2, 2)
-            img2 = F.avg_pool2d(img2, 2, 2)
+
+            h, w = im1.shape[-2:]
+            pad_h, pad_w = h % 2, w % 2
+            im1 = F.pad(im1, (0, pad_w, 0, pad_h), 'reflect')
+            im2 = F.pad(im2, (0, pad_w, 0, pad_h), 'reflect')
+
+            im1 = F.avg_pool2d(im1, 2, 2)
+            im2 = F.avg_pool2d(im2, 2, 2)
         else:
             values.append(out['ssim'])
 
     values = torch.stack(values, dim=0).clamp(min=eps)
-    msssim = torch.prod(values**weights[:, None], dim=0)
+    msssim = torch.prod(values**weights.unsqueeze(1), dim=0)
 
     return msssim
 
@@ -154,136 +163,123 @@ def _msssim(img1,
 class SSIM(nn.Module):
     '''Structural Similarity Index'''
     def __init__(self,
-                 window_size=11,
-                 channel=1,
-                 val_range=None,
-                 no_luminance=False,
+                 win_size=11,
+                 data_range=1.0,
                  use_padding=False,
                  size_average=True):
         super(SSIM, self).__init__()
-        self.window_size = window_size
-        self.channel = channel
-        self.val_range = val_range
-        self.no_luminance = no_luminance
+        self.win_size = win_size
+        self.data_range = data_range
         self.use_padding = use_padding
         self.size_average = size_average
 
-        window = create_window(window_size, channel=channel)
+        window = create_window(win_size)
         self.register_buffer('window', window)
 
     def forward(self, img1, img2):
-        return _ssim(img1,
-                     img2,
-                     self.window,
-                     val_range=self.val_range,
-                     no_luminance=self.no_luminance,
-                     use_padding=self.use_padding,
-                     size_average=self.size_average)
+        return cmpt_ssim(img1,
+                         img2,
+                         window=self.window,
+                         data_range=self.data_range,
+                         use_padding=self.use_padding,
+                         size_average=self.size_average)
 
 
 class MS_SSIM(SSIM):
     '''Multi-Scale Structural Similarity Index'''
     def __init__(self,
-                 window_size=11,
-                 channel=1,
-                 val_range=None,
-                 no_luminance=False,
+                 win_size=11,
+                 data_range=1.0,
                  use_padding=False,
                  size_average=True):
-        super(MS_SSIM, self).__init__(window_size, channel, val_range,
-                                      no_luminance, use_padding, size_average)
+        super(MS_SSIM, self).__init__(win_size, data_range, use_padding,
+                                      size_average)
 
         weights = torch.FloatTensor([0.0448, 0.2856, 0.3001, 0.2363, 0.1333])
         self.register_buffer('weights', weights)
 
     def forward(self, img1, img2):
-        return _msssim(img1,
-                       img2,
-                       self.weights,
-                       self.window,
-                       val_range=self.val_range,
-                       no_luminance=self.no_luminance,
-                       use_padding=self.use_padding,
-                       size_average=self.size_average)
+        return cmpt_msssim(img1,
+                           img2,
+                           window=self.window,
+                           weights=self.weights,
+                           data_range=self.data_range,
+                           use_padding=self.use_padding,
+                           size_average=self.size_average)
 
 
 class MSW_SSIM(nn.Module):
     '''Multi-Scale and Weighted Structural Similarity Index'''
     def __init__(self,
-                 window_sizes=(11, 9, 7, 5, 3),
-                 channel=1,
-                 val_range=None,
-                 no_luminance=False,
+                 win_sizes=(11, 9, 7, 5, 3),
+                 data_range=1.0,
                  use_padding=False,
                  size_average=False):
         super(MSW_SSIM, self).__init__()
-        self.window_sizes = window_sizes
-        self.channel = channel
-        self.val_range = val_range
-        self.no_luminance = no_luminance
+        self.win_sizes = win_sizes
+        self.data_range = data_range
         self.use_padding = use_padding
         self.size_average = size_average
-        self.ssim_fns = (SSIM(s, channel, val_range, no_luminance, use_padding,
-                              size_average) for s in window_sizes)
+        self.ssim_fns = (SSIM(win_size, data_range, use_padding, size_average)
+                         for win_size in win_sizes)
 
-    def forward(self, img1, img2, pred):
+    def forward(self, img1, img2, imgf):
         ssim = 0.0
 
         for ssim_fn in self.ssim_fns:
-            out1 = ssim_fn(pred, img1)
-            out2 = ssim_fn(pred, img2)
+            out1 = ssim_fn(img1, imgf)
+            out2 = ssim_fn(img2, imgf)
             gamma = out1['sigma'] / (out1['sigma'] +
                                      out2['sigma']).clamp_(min=eps)
             ssim += (gamma * out1['ssim']).mean() + (
                 (1.0 - gamma) * out2['ssim']).mean()
 
-        return ssim / len(self.window_sizes)
+        return ssim / len(self.win_sizes)
 
 
 class SSIMLoss(nn.Module):
     def __init__(self,
                  mode='ssim',
-                 val_range=None,
-                 no_luminance=False,
+                 data_range=1.0,
+                 use_padding=False,
                  weight=1.0):
         super(SSIMLoss, self).__init__()
         self.mode = mode
-        self.val_range = val_range
-        self.no_luminance = no_luminance
+        self.data_range = data_range
+        self.use_padding = use_padding
         self.weight = weight
 
-    def forward(self, img1, img2, pred):
-        channel = img1.shape[1]
-
+    def forward(self, img1, img2, imgf):
         if self.mode == 'ssim':
-            ssim_fn = SSIM(11, channel, self.val_range, self.no_luminance)
-            ssim1 = ssim_fn(pred, img1)['ssim'].mean()
-            ssim2 = ssim_fn(pred, img2)['ssim'].mean()
-            loss = (ssim1 + ssim2) / 2.0
+            ssim_fn = SSIM(11, self.data_range, self.use_padding)
+            ssim1 = ssim_fn(img1, imgf)['ssim'].mean()
+            ssim2 = ssim_fn(img2, imgf)['ssim'].mean()
+            loss = (ssim1 + ssim2) * 0.5
 
         elif self.mode == 'w-ssim':
-            ssim_fn = SSIM(11, channel, self.val_range, self.no_luminance)
-            out1 = ssim_fn(pred, img1)
-            out2 = ssim_fn(pred, img2)
+            ssim_fn = SSIM(11, self.data_range, self.use_padding)
+            out1 = ssim_fn(img1, imgf)
+            out2 = ssim_fn(img2, imgf)
             gamma = out1['sigma'] / (out1['sigma'] +
                                      out2['sigma']).clamp_(min=eps)
             loss = (gamma * out1['ssim']).mean() + (
                 (1.0 - gamma) * out2['ssim']).mean()
 
         elif self.mode == 'ms-ssim':
-            msssim_fn = MS_SSIM(11, channel, self.val_range, self.no_luminance)
-            msssim1 = msssim_fn(pred, img1).mean()
-            msssim2 = msssim_fn(pred, img2).mean()
-            loss = (msssim1 + msssim2) / 2.0
+            msssim_fn = MS_SSIM(11, self.data_range, self.use_padding)
+            msssim1 = msssim_fn(img1, imgf).mean()
+            msssim2 = msssim_fn(img2, imgf).mean()
+            loss = (msssim1 + msssim2) * 0.5
 
         elif self.mode == 'msw-ssim':
-            mswssim_fn = MSW_SSIM((11, 9, 7, 5, 3), channel, self.val_range,
-                                  self.no_luminance)
-            loss = mswssim_fn(img1, img2, pred)
+            mswssim_fn = MSW_SSIM((11, 9, 7, 5, 3), self.data_range,
+                                  self.use_padding)
+            loss = mswssim_fn(img1, img2, imgf)
 
         else:
             raise ValueError(
-                "only supported ['ssim', 'ms-ssim', 'msw-ssim'] mode")
+                "only supported ['ssim', 'w-ssim', 'ms-ssim', 'msw-ssim'] mode"
+            )
 
         return self.weight * (1.0 - loss)
 
@@ -295,15 +291,15 @@ class PixelLoss(nn.Module):
         self.weight = weight
         self.loss_fn = NormLoss(mode, weight)
 
-    def forward(self, img1, img2, pred, mode='avg'):
+    def forward(self, img1, img2, imgf, mode='avg'):
         if mode == 'avg':
-            loss1 = pred - img1
-            loss2 = pred - img2
+            loss1 = imgf - img1
+            loss2 = imgf - img2
 
-            return (self.loss_fn(loss1) + self.loss_fn(loss2)) / 2.0
+            return (self.loss_fn(loss1) + self.loss_fn(loss2)) * 0.5
 
         elif mode == 'max':
-            loss = pred - torch.max(img1, img2)
+            loss = imgf - torch.max(img1, img2)
 
             return self.loss_fn(loss)
 
@@ -315,31 +311,35 @@ class GradLoss(nn.Module):
         self.weight = weight
         self.loss_fn = NormLoss(mode, weight)
 
-    @staticmethod
-    def _sobel(img):
-        sobel_x = torch.FloatTensor([[-1, 0, 1], [-2, 0, 2],
-                                     [-1, 0, 1]]).reshape([1, 1, 3, 3])
-        sobel_y = torch.FloatTensor([[-1, -2, -1], [0, 0, 0],
-                                     [1, 2, 1]]).reshape([1, 1, 3, 3])
+        x_sobel = torch.FloatTensor([[-1, 0, 1], [-2, 0, 2],
+                                     [-1, 0, 1]]).reshape(1, 1, 3, 3)
+        y_sobel = torch.FloatTensor([[-1, -2, -1], [0, 0, 0],
+                                     [1, 2, 1]]).reshape(1, 1, 3, 3)
 
-        grad_x = F.conv2d(img, sobel_x.to(img, non_blocking=True))
-        grad_y = F.conv2d(img, sobel_y.to(img, non_blocking=True))
+        self.register_buffer('x_sobel', x_sobel)
+        self.register_buffer('y_sobel', y_sobel)
 
-        return torch.abs(grad_x) + torch.abs(grad_y)
+    def _sobel_fn(self, img):
+        im = F.pad(img.clone(), (1, 1, 1, 1), 'reflect')
 
-    def forward(self, img1, img2, pred, mode='avg'):
-        img1 = self._sobel(img1)
-        img2 = self._sobel(img2)
-        pred = self._sobel(pred)
+        x_grad = F.conv2d(im, self.x_sobel.to(im, non_blocking=True))
+        y_grad = F.conv2d(im, self.y_sobel.to(im, non_blocking=True))
+
+        return torch.abs(x_grad) + torch.abs(y_grad)
+
+    def forward(self, img1, img2, imgf, mode='avg'):
+        img1 = self._sobel_fn(img1)
+        img2 = self._sobel_fn(img2)
+        imgf = self._sobel_fn(imgf)
 
         if mode == 'avg':
-            loss1 = pred - img1
-            loss2 = pred - img2
+            loss1 = imgf - img1
+            loss2 = imgf - img2
 
-            return (self.loss_fn(loss1) + self.loss_fn(loss2)) / 2.0
+            return (self.loss_fn(loss1) + self.loss_fn(loss2)) * 0.5
 
         elif mode == 'max':
-            loss = pred - torch.max(img1, img2)
+            loss = imgf - torch.max(img1, img2)
 
             return self.loss_fn(loss)
 
@@ -352,8 +352,8 @@ class TVLoss(nn.Module):
         self.loss_fn = NormLoss(mode, weight)
 
     def forward(self, x):
-        tv_h = x[:, :, 1:, :] - x[:, :, :-1, :]
-        tv_w = x[:, :, :, 1:] - x[:, :, :, :-1]
+        tv_h = x[..., 1:, :] - x[..., :-1, :]
+        tv_w = x[..., :, 1:] - x[..., :, :-1]
 
         return self.loss_fn(tv_h) + self.loss_fn(tv_w)
 
@@ -387,38 +387,33 @@ class NormLoss(nn.Module):
 
 if __name__ == '__main__':
 
-    import torch
-
     torch.manual_seed(0)
 
     ssim_modes = ['ssim', 'w-ssim', 'ms-ssim', 'msw-ssim']
     norm_modes = ['l1', 'l2']
-    weights = [1.0, 0.1, 0.01, 0.0]
+    weights = [1.0, 0.1, 0.01, 0.001, 0.0]
 
     ssim_mode, ssim_weight = ssim_modes[0], weights[0]
     pixel_mode, pixel_weight = norm_modes[0], weights[2]
     grad_mode, grad_weight = norm_modes[0], weights[1]
 
-    loss_fn1 = SSIMLoss(ssim_mode, no_luminance=False, weight=ssim_weight)
+    loss_fn1 = SSIMLoss(ssim_mode, weight=ssim_weight)
     loss_fn2 = PixelLoss(pixel_mode, weight=pixel_weight)
     loss_fn3 = GradLoss(grad_mode, weight=grad_weight)
-    loss_fn4 = TVLoss(norm_modes[0])
+    loss_fn4 = TVLoss(norm_modes[0], weight=weights[0])
 
-    x1 = torch.rand(2, 1, 224, 224)
-    x2 = torch.rand(2, 1, 224, 224)
-    y = torch.rand(2, 1, 224, 224)
+    x1 = torch.rand(2, 1, 256, 256)
+    x2 = torch.rand(2, 1, 256, 256)
+    y = torch.rand(2, 1, 256, 256)
 
     loss1 = loss_fn1(x1, x2, y)
-    print(loss1.item())
-
     loss2 = loss_fn2(x1, x2, y)
-    print(loss2.item())
-
     loss3 = loss_fn3(x1, x2, y)
-    print(loss3.item())
-
     loss4 = loss_fn4(y - x1)
-    print(loss4.item())
-
     total_loss = loss1 + loss2 + loss3
-    print(total_loss.item())
+
+    print('ssim loss: {}'.format(loss1.item()))
+    print('pixel loss: {}'.format(loss2.item()))
+    print('grad loss: {}'.format(loss3.item()))
+    print('tv loss: {}'.format(loss4.item()))
+    print('total loss: {}'.format(total_loss.item()))

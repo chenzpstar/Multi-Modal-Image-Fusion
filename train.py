@@ -14,57 +14,24 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.join(BASE_DIR, '..'))
 
-import argparse
 import time
 
 import cv2
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from common import *
-from core.block import *
-from core.loss import GradLoss, PixelLoss, SSIMLoss
-from core.model import *
-from data.dataset import FusionDataset as Dataset
-from data.patches import FusionPatches as Patches
 from torch import optim
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim.lr_scheduler import ExponentialLR, MultiStepLR
 from torch.utils.data import DataLoader, DistributedSampler
 from torch.utils.tensorboard import SummaryWriter
 
-
-def get_args():
-    parser = argparse.ArgumentParser(description='Training')
-    parser.add_argument('--lr', default=1e-4, type=float, help='learning rate')
-    parser.add_argument('--bs', default=4, type=int, help='batch size')
-    parser.add_argument('--epoch', default=36, type=int, help='num of epochs')
-    parser.add_argument('--use_patches',
-                        default=False,
-                        type=bool,
-                        help='enable to train with patches')
-    parser.add_argument('--warmup',
-                        default=False,
-                        type=bool,
-                        help='enable to warm up lr')
-    parser.add_argument('--clip_grad',
-                        default=True,
-                        type=bool,
-                        help='enable to clip grad norm')
-    parser.add_argument('--local_rank',
-                        default=0,
-                        type=int,
-                        help='node rank for distribution')
-    parser.add_argument('--local_world_size',
-                        default=1,
-                        type=int,
-                        help='num of gpus for distribution')
-    parser.add_argument('--data',
-                        default='roadscene',
-                        type=str,
-                        help='dataset folder name')
-
-    return parser.parse_args()
+from common import *
+from core.block import *
+from core.loss import GradLoss, PixelLoss, SSIMLoss
+from core.model import *
+from data.dataset import FusionDataset as Dataset
+from data.patches import FusionPatches as Patches
 
 
 def train_model(model,
@@ -93,12 +60,12 @@ def train_model(model,
         if mode == 'train':
             optimizer.zero_grad(set_to_none=True)
 
-            pred = model(img1, img2)
-            loss1 = loss_fn1(img1, img2, pred)
-            loss2 = loss_fn2(img1, img2, pred, mode='avg')
-            loss3 = loss_fn3(img1, img2, pred, mode='avg')
-            # loss2 = loss_fn2(img1, img2, pred, mode='max')
-            # loss3 = loss_fn3(img1, img2, pred, mode='max')
+            imgf = model(img1, img2)
+            loss1 = loss_fn1(img1, img2, imgf)
+            # loss2 = loss_fn2(img1, img2, imgf, mode='avg')
+            # loss3 = loss_fn3(img1, img2, imgf, mode='avg')
+            loss2 = loss_fn2(img1, img2, imgf, mode='max')
+            loss3 = loss_fn3(img1, img2, imgf, mode='max')
             total_loss = loss1 + loss2 + loss3
 
             total_loss.backward()
@@ -110,16 +77,16 @@ def train_model(model,
             if args.warmup and epoch < 1:
                 warmup_scheduler.step()
             # else:
-            #     scheduler2.step()
+            #     iter_scheduler.step()
 
         elif mode == 'valid':
             with torch.no_grad():
-                pred = model(img1, img2)
-                loss1 = loss_fn1(img1, img2, pred)
-                loss2 = loss_fn2(img1, img2, pred, mode='avg')
-                loss3 = loss_fn3(img1, img2, pred, mode='avg')
-                # loss2 = loss_fn2(img1, img2, pred, mode='max')
-                # loss3 = loss_fn3(img1, img2, pred, mode='max')
+                imgf = model(img1, img2)
+                loss1 = loss_fn1(img1, img2, imgf)
+                # loss2 = loss_fn2(img1, img2, imgf, mode='avg')
+                # loss3 = loss_fn3(img1, img2, imgf, mode='avg')
+                loss2 = loss_fn2(img1, img2, imgf, mode='max')
+                loss3 = loss_fn3(img1, img2, imgf, mode='max')
                 total_loss = loss1 + loss2 + loss3
 
         if is_distributed:
@@ -128,7 +95,7 @@ def train_model(model,
             loss2 = reduce_value(loss2, args.local_world_size)
             loss3 = reduce_value(loss3, args.local_world_size)
 
-        loss.update(total_loss.item(), len(pred))
+        loss.update(total_loss.item(), len(imgf))
 
         if local_rank == 0:
             global_step = num_iters * epoch + iter
@@ -155,8 +122,8 @@ def train_model(model,
         logger.info('cost time: {:.3f}s\n'.format(cost_time))
 
         if save_dir is not None:
-            result = save_result(pred[0], img1[0], img2[0])
-            # result = save_result(pred[0])
+            result = save_result(imgf[0], img1[0], img2[0])
+            # result = save_result(imgf[0])
             file_name = '{:0>2}.png'.format(epoch_idx)
             cv2.imwrite(os.path.join(save_dir, file_name), result)
 
@@ -169,11 +136,11 @@ def train_model(model,
 if __name__ == '__main__':
     # 0. config
     torch.cuda.empty_cache()
-    setup_seed(seed=0, deterministic=False)
+    setup_seed(seed=0, deterministic=True)
 
     ckpt_dir, logger = make_logger(BASE_DIR)
 
-    args = get_args()
+    args = get_train_args()
 
     lr = args.lr
     batch_size = args.bs
@@ -211,17 +178,27 @@ if __name__ == '__main__':
             os.makedirs(valid_save_dir)
 
     # 1. data
+    if args.data in ['tno', 'roadscene']:
+        set_name = None
+    elif args.data in ['msrs', 'polar']:
+        set_name = 'train'
+
     if args.use_patches:
-        train_set = Patches(data_dir, set_name='train', transform=True)
-        valid_set = Patches(data_dir, set_name='valid')
+        train_set = Patches(data_dir,
+                            set_name=set_name,
+                            set_type='train',
+                            transform=True)
+        valid_set = Patches(data_dir, set_name=set_name, set_type='valid')
     else:
-        # train_set = Dataset(data_dir, set_name='train', transform=True)
-        # valid_set = Dataset(data_dir, set_name='valid')
         train_set = Dataset(data_dir,
+                            set_name=set_name,
                             set_type='train',
                             transform=True,
                             fix_size=True)
-        valid_set = Dataset(data_dir, set_type='valid', fix_size=True)
+        valid_set = Dataset(data_dir,
+                            set_name=set_name,
+                            set_type='valid',
+                            fix_size=True)
 
     if is_distributed:
         train_sampler = DistributedSampler(train_set, shuffle=True)
@@ -267,10 +244,11 @@ if __name__ == '__main__':
         logger.info('encoder: {}, decoder: {}'.format(encoder.__name__,
                                                       decoder.__name__))
 
-    model = MyFusion(encoder, decoder).to(device, non_blocking=True)
+    model = MyFusion(encoder, decoder,
+                     share_weight_levels=4).to(device, non_blocking=True)
 
     if local_rank == 0:
-        params = sum([param.nelement() for param in model.parameters()])
+        params = sum([param.numel() for param in model.parameters()])
         logger.info('params: {:.3f}M'.format(params / 1e6))
 
     if is_distributed:
@@ -292,7 +270,7 @@ if __name__ == '__main__':
     # 3. optimize
     ssim_modes = ['ssim', 'w-ssim', 'ms-ssim', 'msw-ssim']
     norm_modes = ['l1', 'l2']
-    weights = [1.0, 0.1, 0.01, 0.0]
+    weights = [1.0, 0.1, 0.01, 0.001, 0.0]
 
     ssim_mode, ssim_weight = ssim_modes[0], weights[0]
     pixel_mode, pixel_weight = norm_modes[0], weights[2]
@@ -303,14 +281,14 @@ if __name__ == '__main__':
             pixel_mode, pixel_weight))
         logger.info('grad mode: {}, weight: {}'.format(grad_mode, grad_weight))
 
-    loss_fn1 = SSIMLoss(ssim_mode, no_luminance=False, weight=ssim_weight)
+    loss_fn1 = SSIMLoss(ssim_mode, weight=ssim_weight)
     loss_fn2 = PixelLoss(pixel_mode, weight=pixel_weight)
     loss_fn3 = GradLoss(grad_mode, weight=grad_weight)
 
     optimizer = optim.Adam(model.parameters(), lr=lr, betas=betas)
 
-    scheduler1 = MultiStepLR(optimizer, milestones, 0.1)
-    # scheduler2 = ExponentialLR(optimizer, 0.99)
+    epoch_scheduler = MultiStepLR(optimizer, milestones, 0.1)
+    # iter_scheduler = ExponentialLR(optimizer, 0.99)
     warmup_scheduler = WarmupLR(optimizer, 0.001,
                                 len(train_loader)) if args.warmup else None
 
@@ -339,7 +317,7 @@ if __name__ == '__main__':
                                  loss_fn3, epoch, 'valid', valid_save_dir)
 
         # 3. update lr
-        scheduler1.step()
+        epoch_scheduler.step()
 
         if local_rank == 0:
             writer.add_scalar('train_loss_epoch', train_loss, epoch)

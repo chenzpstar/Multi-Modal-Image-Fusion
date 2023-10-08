@@ -264,7 +264,6 @@ class MixConvBlock(nn.Module):
     def __init__(self,
                  in_ch,
                  out_ch,
-                 width,
                  scale=4,
                  bias=False,
                  act='relu',
@@ -276,9 +275,9 @@ class MixConvBlock(nn.Module):
 
         self.in_ch = in_ch
         self.out_ch = out_ch
-        self.width = width
         self.scale = scale
-        hid_ch = width * scale
+        width = int(in_ch / 2)
+        hid_ch = int(width * scale)
 
         self.pwconv1 = ConvLayer(in_ch, hid_ch, ksize=1, bias=bias, act=act)
         self.dwconvs = nn.ModuleList([
@@ -328,7 +327,6 @@ class Res2ConvBlock(nn.Module):
     def __init__(self,
                  in_ch,
                  out_ch,
-                 width,
                  scale=4,
                  bias=False,
                  act='relu',
@@ -340,9 +338,9 @@ class Res2ConvBlock(nn.Module):
 
         self.in_ch = in_ch
         self.out_ch = out_ch
-        self.width = width
         self.scale = scale
-        hid_ch = width * scale
+        width = int(in_ch / 2)
+        hid_ch = int(width * scale)
 
         self.pwconv1 = ConvLayer(in_ch, hid_ch, ksize=1, bias=bias, act=act)
         self.dwconvs = nn.ModuleList([
@@ -458,7 +456,7 @@ class MetaFormerBlock(nn.Module):
                  token_mixer=nn.Identity,
                  norm_layer=LayerNorm,
                  layer_scale=None,
-                 res_scale=None,
+                 res_scale=1.0,
                  drop=0.0):
         super(MetaFormerBlock, self).__init__()
         self.in_ch = in_ch
@@ -492,7 +490,7 @@ class ConvFormerBlock(MetaFormerBlock):
                  out_ch,
                  norm_layer=LayerNorm,
                  layer_scale=None,
-                 res_scale=None):
+                 res_scale=1.0):
         super(ConvFormerBlock, self).__init__(in_ch,
                                               out_ch,
                                               norm_layer=norm_layer,
@@ -508,10 +506,9 @@ class MixFormerBlock(MetaFormerBlock):
     def __init__(self,
                  in_ch,
                  out_ch,
-                 width,
                  norm_layer=LayerNorm,
                  layer_scale=None,
-                 res_scale=None):
+                 res_scale=1.0):
         super(MixFormerBlock, self).__init__(in_ch,
                                              out_ch,
                                              norm_layer=norm_layer,
@@ -519,7 +516,6 @@ class MixFormerBlock(MetaFormerBlock):
                                              res_scale=res_scale)
         self.token_mixer = MixConvBlock(in_ch,
                                         out_ch,
-                                        width,
                                         residual=False,
                                         attention=False)
 
@@ -528,10 +524,9 @@ class Res2FormerBlock(MetaFormerBlock):
     def __init__(self,
                  in_ch,
                  out_ch,
-                 width,
                  norm_layer=LayerNorm,
                  layer_scale=None,
-                 res_scale=None):
+                 res_scale=1.0):
         super(Res2FormerBlock, self).__init__(in_ch,
                                               out_ch,
                                               norm_layer=norm_layer,
@@ -539,7 +534,6 @@ class Res2FormerBlock(MetaFormerBlock):
                                               res_scale=res_scale)
         self.token_mixer = Res2ConvBlock(in_ch,
                                          out_ch,
-                                         width,
                                          residual=False,
                                          attention=False)
 

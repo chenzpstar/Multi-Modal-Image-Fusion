@@ -30,11 +30,9 @@ def norm(img, mode=None):
 
 
 def denorm(img):
-    img = img.detach().cpu().numpy()
-    img = img.clip(0, 1) * 255.0
-    img = img.transpose((1, 2, 0)).astype(np.uint8)
+    im = img.detach().cpu().numpy().clip(0, 1) * 255.0
 
-    return img
+    return im.transpose((1, 2, 0)).astype(np.uint8)
 
 
 def transform(img, mode=0):

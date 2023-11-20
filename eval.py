@@ -27,27 +27,27 @@ from core.metric import *
 
 
 def eval_metrics(img1, img2, imgf):
-    sd = cmpt_std(imgf)
-    ag = cmpt_ag(imgf)
-    sf = cmpt_sf(imgf)
+    sd = calc_std(imgf)
+    ag = calc_ag(imgf)
+    sf = calc_sf(imgf)
 
-    mse = (cmpt_mse(img1, imgf) + cmpt_mse(img2, imgf)) * 0.5
-    psnr = cmpt_psnr(mse)
+    mse = (calc_mse(img1, imgf) + calc_mse(img2, imgf)) * 0.5
+    psnr = calc_psnr(mse)
 
-    cc = (cmpt_cc(img1, imgf) + cmpt_cc(img2, imgf)) * 0.5
-    scd = cmpt_scd(img1, img2, imgf)
+    cc = (calc_cc(img1, imgf) + calc_cc(img2, imgf)) * 0.5
+    scd = calc_scd(img1, img2, imgf)
 
-    en = cmpt_entropy(imgf)
-    ce = cmpt_cross_ent(img1, imgf) + cmpt_cross_ent(img2, imgf)
-    mi = cmpt_mul_info(img1, imgf, normalized=True) + cmpt_mul_info(
+    en = calc_entropy(imgf)
+    ce = calc_cross_ent(img1, imgf) + calc_cross_ent(img2, imgf)
+    mi = calc_mul_info(img1, imgf, normalized=True) + calc_mul_info(
         img2, imgf, normalized=True)
 
-    qabf, nabf, labf = cmpt_Qabf(img1, img2, imgf, L=1.5, full=True)
+    qabf, nabf, labf = calc_Qabf(img1, img2, imgf, L=1.5, full=True)
 
-    ssim = (cmpt_ssim(img1, imgf) + cmpt_ssim(img2, imgf)) * 0.5
-    msssim = (cmpt_msssim(img1, imgf) + cmpt_msssim(img2, imgf)) * 0.5
+    ssim = (calc_ssim(img1, imgf) + calc_ssim(img2, imgf)) * 0.5
+    msssim = (calc_msssim(img1, imgf) + calc_msssim(img2, imgf)) * 0.5
 
-    viff = cmpt_viff(img1, img2, imgf, simple=False)
+    viff = calc_viff(img1, img2, imgf, simple=False)
 
     return {
         'sd': sd.item(),
@@ -116,23 +116,29 @@ if __name__ == '__main__':
         'SEDRFuse', 'NestFuse', 'RFNNest', 'UNFusion', 'Res2Fusion',
         'MAFusion', 'IFCNN', 'DIFNet', 'PMGI', 'MyFusion'
     ]
+    method_names = [method_list[0]]
+    exp_name = 'exp1'
 
     # data_dir = os.path.join(BASE_DIR, 'data', 'samples', args.data)
     data_dir = os.path.join(BASE_DIR, '..', 'datasets', args.data)
-    # save_path = os.path.join(BASE_DIR, '..', 'metrics_{}.xlsx'.format(args.data))
+    # save_path = os.path.join(BASE_DIR, '..', f'metrics_{args.data}.xlsx')
 
-    img1_dir = os.path.join(data_dir, 'vi')
-    img2_dir = os.path.join(data_dir, 'ir')
+    if args.data in ['tno']:
+        img1_dir = os.path.join(data_dir, 'vis')
+        img2_dir = os.path.join(data_dir, 'ir')
+    elif args.data in ['roadscene', 'msrs', 'polar']:
+        img1_dir = os.path.join(data_dir, 'test', 'vis')
+        img2_dir = os.path.join(data_dir, 'test', 'ir')
 
-    # ckpt_dir = os.path.join(BASE_DIR, '..', 'checkpoints', args.ckpt)
-    # save_path = os.path.join(ckpt_dir, 'metrics_{}.xlsx'.format(args.data))
+    ckpt_dir = os.path.join(BASE_DIR, '..', 'checkpoints', exp_name, args.ckpt)
+    save_path = os.path.join(ckpt_dir, f'metrics_{args.data}.xlsx')
 
-    # imgf_dir = os.path.join(ckpt_dir, 'test')
+    imgf_dir = os.path.join(ckpt_dir, 'test')
 
-    results_dir = os.path.join(BASE_DIR, '..', 'results', args.data)
-    save_path = os.path.join(results_dir, 'metrics_{}.xlsx'.format(args.data))
+    # results_dir = os.path.join(BASE_DIR, '..', 'results', args.data)
+    # save_path = os.path.join(results_dir, f'metrics_{args.data}.xlsx')
 
-    for i, method_name in enumerate(method_list):
+    for i, method_name in enumerate(method_names):
         sd_list = []
         ag_list = []
         sf_list = []
@@ -152,16 +158,16 @@ if __name__ == '__main__':
         name_list = []
 
         # 评估方法
-        imgf_dir = os.path.join(results_dir, method_name)
+        # imgf_dir = os.path.join(results_dir, method_name)
 
-        print('evaluating {} ...'.format(method_name))
+        print(f'evaluating {method_name} ...')
         start = time.time()
 
-        for img in natsorted(os.listdir(img1_dir)):
+        for i, img in enumerate(natsorted(os.listdir(img1_dir))):
             # 读取数据
             img1_path = os.path.join(img1_dir, img)
             img2_path = os.path.join(img2_dir, img)
-            imgf_path = os.path.join(imgf_dir, img)
+            imgf_path = os.path.join(imgf_dir, f'{i + 1:0>2}.bmp')
 
             img1 = cv2.imread(img1_path,
                               cv2.IMREAD_GRAYSCALE).astype(np.float32)
@@ -184,7 +190,7 @@ if __name__ == '__main__':
             imgf.to(device, non_blocking=True)
 
             # 评估图像
-            print('evaluating {} ...'.format(img))
+            print(f'evaluating {img} ...')
 
             with torch.no_grad():
                 results = eval_metrics(img1, img2, imgf)
@@ -209,8 +215,7 @@ if __name__ == '__main__':
             name_list.append(img)
 
         end = time.time()
-        print('evaluating {} done, cost {:.3f}s'.format(
-            method_name, end - start))
+        print(f'evaluating {method_name} done, cost {end - start:.3f}s')
 
         # 计算均值
         sd_list.insert(0, np.mean(sd_list))
@@ -252,22 +257,22 @@ if __name__ == '__main__':
 
         if sheet_name == 'method':
             # 插入名字
-            sd_list.insert(0, '{}'.format('SD'))
-            ag_list.insert(0, '{}'.format('AG'))
-            sf_list.insert(0, '{}'.format('SF'))
-            mse_list.insert(0, '{}'.format('MSE'))
-            psnr_list.insert(0, '{}'.format('PSNR'))
-            cc_list.insert(0, '{}'.format('CC'))
-            scd_list.insert(0, '{}'.format('SCD'))
-            en_list.insert(0, '{}'.format('EN'))
-            ce_list.insert(0, '{}'.format('CE'))
-            mi_list.insert(0, '{}'.format('MI'))
-            qabf_list.insert(0, '{}'.format('Qabf'))
-            nabf_list.insert(0, '{}'.format('Nabf'))
-            labf_list.insert(0, '{}'.format('Labf'))
-            ssim_list.insert(0, '{}'.format('SSIM'))
-            msssim_list.insert(0, '{}'.format('MSSSIM'))
-            viff_list.insert(0, '{}'.format('VIFF'))
+            sd_list.insert(0, f'{"SD"}')
+            ag_list.insert(0, f'{"AG"}')
+            sf_list.insert(0, f'{"SF"}')
+            mse_list.insert(0, f'{"MSE"}')
+            psnr_list.insert(0, f'{"PSNR"}')
+            cc_list.insert(0, f'{"CC"}')
+            scd_list.insert(0, f'{"SCD"}')
+            en_list.insert(0, f'{"EN"}')
+            ce_list.insert(0, f'{"CE"}')
+            mi_list.insert(0, f'{"MI"}')
+            qabf_list.insert(0, f'{"Qabf"}')
+            nabf_list.insert(0, f'{"Nabf"}')
+            labf_list.insert(0, f'{"Labf"}')
+            ssim_list.insert(0, f'{"SSIM"}')
+            msssim_list.insert(0, f'{"MSSSIM"}')
+            viff_list.insert(0, f'{"VIFF"}')
             name_list.insert(0, '')
 
             # 写入文件
@@ -291,23 +296,23 @@ if __name__ == '__main__':
 
         elif sheet_name == 'metric':
             # 插入名字
-            sd_list.insert(0, '{}'.format(method_name))
-            ag_list.insert(0, '{}'.format(method_name))
-            sf_list.insert(0, '{}'.format(method_name))
-            mse_list.insert(0, '{}'.format(method_name))
-            psnr_list.insert(0, '{}'.format(method_name))
-            cc_list.insert(0, '{}'.format(method_name))
-            scd_list.insert(0, '{}'.format(method_name))
-            en_list.insert(0, '{}'.format(method_name))
-            ce_list.insert(0, '{}'.format(method_name))
-            mi_list.insert(0, '{}'.format(method_name))
-            qabf_list.insert(0, '{}'.format(method_name))
-            nabf_list.insert(0, '{}'.format(method_name))
-            labf_list.insert(0, '{}'.format(method_name))
-            ssim_list.insert(0, '{}'.format(method_name))
-            msssim_list.insert(0, '{}'.format(method_name))
-            viff_list.insert(0, '{}'.format(method_name))
-            name_list.insert(0, '{}')
+            sd_list.insert(0, f'{method_name}')
+            ag_list.insert(0, f'{method_name}')
+            sf_list.insert(0, f'{method_name}')
+            mse_list.insert(0, f'{method_name}')
+            psnr_list.insert(0, f'{method_name}')
+            cc_list.insert(0, f'{method_name}')
+            scd_list.insert(0, f'{method_name}')
+            en_list.insert(0, f'{method_name}')
+            ce_list.insert(0, f'{method_name}')
+            mi_list.insert(0, f'{method_name}')
+            qabf_list.insert(0, f'{method_name}')
+            nabf_list.insert(0, f'{method_name}')
+            labf_list.insert(0, f'{method_name}')
+            ssim_list.insert(0, f'{method_name}')
+            msssim_list.insert(0, f'{method_name}')
+            viff_list.insert(0, f'{method_name}')
+            name_list.insert(0, '')
 
             # 写入文件
             if i == 0:

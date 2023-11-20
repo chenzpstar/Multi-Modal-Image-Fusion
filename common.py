@@ -60,7 +60,7 @@ def get_test_args():
                         type=bool,
                         help='enable to test on gpu')
     parser.add_argument('--data',
-                        default='tno',
+                        default='roadscene',
                         type=str,
                         help='dataset folder name')
     parser.add_argument('--ckpt',

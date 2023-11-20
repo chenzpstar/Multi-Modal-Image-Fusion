@@ -412,8 +412,8 @@ if __name__ == '__main__':
     loss4 = loss_fn4(y - x1)
     total_loss = loss1 + loss2 + loss3
 
-    print('ssim loss: {}'.format(loss1.item()))
-    print('pixel loss: {}'.format(loss2.item()))
-    print('grad loss: {}'.format(loss3.item()))
-    print('tv loss: {}'.format(loss4.item()))
-    print('total loss: {}'.format(total_loss.item()))
+    print(f'ssim loss: {loss1.item():.4f}')
+    print(f'pixel loss: {loss2.item():.4f}')
+    print(f'grad loss: {loss3.item():.4f}')
+    print(f'tv loss: {loss4.item():.4f}')
+    print(f'total loss: {total_loss.item():.4f}')

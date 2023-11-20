@@ -9,32 +9,33 @@
 
 from math import exp, pi
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 
 __all__ = [
-    'cmpt_mean', 'cmpt_std', 'cmpt_ag', 'cmpt_sf', 'cmpt_mse', 'cmpt_psnr',
-    'cmpt_cc', 'cmpt_scd', 'cmpt_entropy', 'cmpt_cross_ent', 'cmpt_mul_info',
-    'cmpt_Qabf', 'cmpt_Nabf', 'cmpt_Labf', 'cmpt_ssim', 'cmpt_msssim',
-    'cmpt_viff'
+    'calc_mean', 'calc_std', 'calc_ag', 'calc_sf', 'calc_mse', 'calc_psnr',
+    'calc_cc', 'calc_scd', 'calc_entropy', 'calc_cross_ent', 'calc_mul_info',
+    'calc_Qabf', 'calc_Nabf', 'calc_Labf', 'calc_ssim', 'calc_msssim',
+    'calc_viff'
 ]
 
 
 # 1.均值 mean
-def cmpt_mean(img):
+def calc_mean(img):
     return img.mean()
 
 
 # 2.标准差 sd
-def cmpt_std(img):
+def calc_std(img):
     im = img.clone()
-    im -= cmpt_mean(im)
+    im -= calc_mean(im)
 
     return im.pow(2).mean().pow(0.5)
 
 
 # 3.平均梯度 ag
-def cmpt_ag(img):
+def calc_ag(img):
     im = img.clone()
 
     x_grad = im[..., :-1, 1:] - im[..., :-1, :-1]
@@ -46,7 +47,7 @@ def cmpt_ag(img):
 
 
 # 4.空间频率 sf
-def cmpt_sf(img):
+def calc_sf(img):
     im = img.clone()
 
     y_grad = im[..., 1:, :] - im[..., :-1, :]
@@ -59,7 +60,7 @@ def cmpt_sf(img):
 
 
 # 5.均方误差 mse
-def cmpt_mse(img1, img2):
+def calc_mse(img1, img2):
     im1 = img1.clone() / 255.0
     im2 = img2.clone() / 255.0
     err = im1 - im2
@@ -68,7 +69,7 @@ def cmpt_mse(img1, img2):
 
 
 # 6.峰值信噪比 psnr
-def cmpt_psnr(mse, L=1.0, root=False):
+def calc_psnr(mse, L=1.0, root=False):
     if root:
         return 20.0 * torch.log10(L / mse**0.5)
 
@@ -76,12 +77,12 @@ def cmpt_psnr(mse, L=1.0, root=False):
 
 
 # 7.相关系数 cc
-def cmpt_cc(img1, img2):
+def calc_cc(img1, img2):
     im1 = img1.clone()
     im2 = img2.clone()
 
-    im1 -= cmpt_mean(im1)
-    im2 -= cmpt_mean(im2)
+    im1 -= calc_mean(im1)
+    im2 -= calc_mean(im2)
 
     corr12 = (im1 * im2).sum()
     corr11 = (im1 * im1).sum()
@@ -91,28 +92,32 @@ def cmpt_cc(img1, img2):
 
 
 # 8.差异相关性总和 scd
-def cmpt_scd(img1, img2, imgf):
+def calc_scd(img1, img2, imgf):
     diff1 = imgf - img1
     diff2 = imgf - img2
 
-    return cmpt_cc(diff1, img2) + cmpt_cc(diff2, img1)
+    return calc_cc(diff1, img2) + calc_cc(diff2, img1)
 
 
 # 9.信息熵 en
-def cmpt_prob(img):
-    im = img.clone().to(torch.uint8)
+def calc_prob(img):
+    # im = img.clone().to(torch.uint8)
 
-    gray = torch.zeros(256)
+    # gray = torch.zeros(256)
 
-    for i in range(im.shape[-2]):
-        for j in range(im.shape[-1]):
-            gray[im[..., i, j].item()] += 1
+    # for i in range(im.shape[-2]):
+    #     for j in range(im.shape[-1]):
+    #         gray[im[..., i, j].item()] += 1
 
-    return gray / im.numel()
+    im = img.clone()
+    hist = torch.histc(im, 256, 0, 256)
+    # hist = torch.from_numpy(np.histogram(im.numpy(), 256, (0, 256))[0])
+
+    return hist / im.numel()
 
 
-def cmpt_entropy(img):
-    prob = cmpt_prob(img)
+def calc_entropy(img):
+    prob = calc_prob(img)
 
     idx = torch.where(prob != 0)
     en = -prob[idx] * torch.log2(prob[idx])
@@ -121,21 +126,25 @@ def cmpt_entropy(img):
 
 
 # 10.联合熵 je
-def cmpt_joint_prob(img1, img2):
-    im1 = img1.clone().to(torch.uint8)
-    im2 = img2.clone().to(torch.uint8)
+def calc_joint_prob(img1, img2):
+    # im1 = img1.clone().to(torch.uint8)
+    # im2 = img2.clone().to(torch.uint8)
 
-    gray = torch.zeros((256, 256))
+    # gray = torch.zeros((256, 256))
 
-    for i in range(im1.shape[-2]):
-        for j in range(im1.shape[-1]):
-            gray[im1[..., i, j].item(), im2[..., i, j].item()] += 1
+    # for i in range(im1.shape[-2]):
+    #     for j in range(im1.shape[-1]):
+    #         gray[im1[..., i, j].item(), im2[..., i, j].item()] += 1
 
-    return gray / im1.numel()
+    im1 = img1.clone()
+    im2 = img2.clone()
+    hist = torch.from_numpy(np.histogram2d(im1.numpy().flatten(), im2.numpy().flatten(), 256, ((0, 256), (0, 256)))[0])
+
+    return hist / im1.numel()
 
 
-def cmpt_joint_ent(img1, img2):
-    prob12 = cmpt_joint_prob(img1, img2)
+def calc_joint_ent(img1, img2):
+    prob12 = calc_joint_prob(img1, img2)
 
     idx = torch.where(prob12 != 0)
     je = -prob12[idx] * torch.log2(prob12[idx])
@@ -144,9 +153,9 @@ def cmpt_joint_ent(img1, img2):
 
 
 # 11.交叉熵 ce
-def cmpt_cross_ent(img1, img2):
-    prob1 = cmpt_prob(img1)
-    prob2 = cmpt_prob(img2)
+def calc_cross_ent(img1, img2):
+    prob1 = calc_prob(img1)
+    prob2 = calc_prob(img2)
 
     idx = torch.where(prob1 * prob2 != 0)
     ce = prob1[idx] * torch.log2(prob1[idx] / prob2[idx])
@@ -155,19 +164,19 @@ def cmpt_cross_ent(img1, img2):
 
 
 # 12.互信息 mi
-def cmpt_mul_info(img1, img2, normalized=False):
-    # prob1 = cmpt_prob(img1)
-    # prob2 = cmpt_prob(img2)
-    # prob12 = cmpt_joint_prob(img1, img2)
+def calc_mul_info(img1, img2, normalized=False):
+    # prob1 = calc_prob(img1)
+    # prob2 = calc_prob(img2)
+    # prob12 = calc_joint_prob(img1, img2)
 
     # idx = torch.where(prob1.reshape(-1, 1) * prob2.reshape(1, -1) * prob12 != 0)
     # mi = prob12[idx] * torch.log2(prob12[idx] / (prob1[idx[0]] * prob2[idx[1]]))
 
     # return mi.sum()
 
-    en1 = cmpt_entropy(img1)
-    en2 = cmpt_entropy(img2)
-    en12 = cmpt_joint_ent(img1, img2)
+    en1 = calc_entropy(img1)
+    en2 = calc_entropy(img2)
+    en12 = calc_joint_ent(img1, img2)
 
     mi = en1 + en2 - en12
 
@@ -195,7 +204,7 @@ def _sobel_fn(img):
     return grad, alpha
 
 
-def cmpt_Qxy(img1, img2, mode='qabf', full=False):
+def calc_Qxy(img1, img2, mode='qabf', full=False):
     g1, a1 = _sobel_fn(img1)
     g2, a2 = _sobel_fn(img2)
 
@@ -219,13 +228,13 @@ def cmpt_Qxy(img1, img2, mode='qabf', full=False):
     return Qg * Qa, g1
 
 
-def cmpt_Qabf(img1, img2, imgf, L=1.5, full=False):
+def calc_Qabf(img1, img2, imgf, L=1.5, full=False):
     if full:
-        Qaf, ga, gf = cmpt_Qxy(img1, imgf, full=full)
+        Qaf, ga, gf = calc_Qxy(img1, imgf, full=full)
     else:
-        Qaf, ga = cmpt_Qxy(img1, imgf)
+        Qaf, ga = calc_Qxy(img1, imgf)
 
-    Qbf, gb = cmpt_Qxy(img2, imgf)
+    Qbf, gb = calc_Qxy(img2, imgf)
 
     wa = ga.pow(L)
     wb = gb.pow(L)
@@ -246,9 +255,9 @@ def cmpt_Qabf(img1, img2, imgf, L=1.5, full=False):
 
 
 # 14.Nabf
-def cmpt_Nabf(img1, img2, imgf, L=1.5, modified=True):
-    Qaf, ga, gf = cmpt_Qxy(img1, imgf, mode='qabf', full=True)
-    Qbf, gb = cmpt_Qxy(img2, imgf, mode='qabf')
+def calc_Nabf(img1, img2, imgf, L=1.5, modified=True):
+    Qaf, ga, gf = calc_Qxy(img1, imgf, mode='qabf', full=True)
+    Qbf, gb = calc_Qxy(img2, imgf, mode='qabf')
 
     wa = ga.pow(L)
     wb = gb.pow(L)
@@ -263,9 +272,9 @@ def cmpt_Nabf(img1, img2, imgf, L=1.5, modified=True):
 
 
 # 15.Labf
-def cmpt_Labf(img1, img2, imgf, L=1.5):
-    Qaf, ga, gf = cmpt_Qxy(img1, imgf, mode='qabf', full=True)
-    Qbf, gb = cmpt_Qxy(img2, imgf, mode='qabf')
+def calc_Labf(img1, img2, imgf, L=1.5):
+    Qaf, ga, gf = calc_Qxy(img1, imgf, mode='qabf', full=True)
+    Qbf, gb = calc_Qxy(img2, imgf, mode='qabf')
 
     wa = ga.pow(L)
     wb = gb.pow(L)
@@ -302,7 +311,7 @@ def _gaussian_fn(img, window, use_padding=False):
     return F.conv2d(img, window, groups=channel)
 
 
-def cmpt_ssim(img1,
+def calc_ssim(img1,
               img2,
               win_size=11,
               data_range=255.0,
@@ -354,7 +363,7 @@ def cmpt_ssim(img1,
 
 
 # 17.msssim
-def cmpt_msssim(img1, img2, win_size=11, data_range=255.0, use_padding=False):
+def calc_msssim(img1, img2, win_size=11, data_range=255.0, use_padding=False):
     weights = torch.FloatTensor([0.0448, 0.2856, 0.3001, 0.2363, 0.1333])
     weights = weights.to(img1, non_blocking=True)
 
@@ -365,7 +374,7 @@ def cmpt_msssim(img1, img2, win_size=11, data_range=255.0, use_padding=False):
     levels = len(weights)
 
     for i in range(levels):
-        ssim, cs = cmpt_ssim(im1,
+        ssim, cs = calc_ssim(im1,
                              im2,
                              win_size,
                              data_range,
@@ -392,7 +401,7 @@ def cmpt_msssim(img1, img2, win_size=11, data_range=255.0, use_padding=False):
 
 
 # 18.viff
-def cmpt_vif(img1, img2, use_padding=False):
+def calc_vif(img1, img2, use_padding=False):
     eps = 1e-10
     sn_sq = 0.005 * 255 * 255
     VID, VIND, G = [], [], []
@@ -447,9 +456,9 @@ def cmpt_vif(img1, img2, use_padding=False):
     return VID, VIND, G
 
 
-def cmpt_viff(img1, img2, imgf, simple=True):
-    N1, D1, G1 = cmpt_vif(img1, imgf)
-    N2, D2, G2 = cmpt_vif(img2, imgf)
+def calc_viff(img1, img2, imgf, simple=True):
+    N1, D1, G1 = calc_vif(img1, imgf)
+    N2, D2, G2 = calc_vif(img2, imgf)
 
     if simple:
         num1, num2 = 0.0, 0.0
@@ -492,49 +501,49 @@ if __name__ == '__main__':
 
     start = time.time()
 
-    mean = cmpt_mean(y)
-    sd = cmpt_std(y)
-    ag = cmpt_ag(y)
-    sf = cmpt_sf(y)
+    mean = calc_mean(y)
+    sd = calc_std(y)
+    ag = calc_ag(y)
+    sf = calc_sf(y)
 
-    mse = (cmpt_mse(x1, y) + cmpt_mse(x2, y)) * 0.5
-    psnr = cmpt_psnr(mse)
+    mse = (calc_mse(x1, y) + calc_mse(x2, y)) * 0.5
+    psnr = calc_psnr(mse)
 
-    cc = (cmpt_cc(x1, y) + cmpt_cc(x2, y)) * 0.5
-    scd = cmpt_scd(x1, x2, y)
+    cc = (calc_cc(x1, y) + calc_cc(x2, y)) * 0.5
+    scd = calc_scd(x1, x2, y)
 
-    en = cmpt_entropy(y)
-    ce = cmpt_cross_ent(x1, y) + cmpt_cross_ent(x2, y)
-    mi = cmpt_mul_info(x1, y, normalized=True) + cmpt_mul_info(
+    en = calc_entropy(y)
+    ce = calc_cross_ent(x1, y) + calc_cross_ent(x2, y)
+    mi = calc_mul_info(x1, y, normalized=True) + calc_mul_info(
         x2, y, normalized=True)
 
-    qabf = cmpt_Qabf(x1, x2, y, L=1.5)
-    nabf = cmpt_Nabf(x1, x2, y, L=1.5, modified=True)
-    labf = cmpt_Labf(x1, x2, y, L=1.5)
+    qabf = calc_Qabf(x1, x2, y, L=1.5)
+    nabf = calc_Nabf(x1, x2, y, L=1.5, modified=True)
+    labf = calc_Labf(x1, x2, y, L=1.5)
 
-    ssim = (cmpt_ssim(x1, y) + cmpt_ssim(x2, y)) * 0.5
-    msssim = (cmpt_msssim(x1, y) + cmpt_msssim(x2, y)) * 0.5
+    ssim = (calc_ssim(x1, y) + calc_ssim(x2, y)) * 0.5
+    msssim = (calc_msssim(x1, y) + calc_msssim(x2, y)) * 0.5
 
-    viff = cmpt_viff(x1, x2, y, simple=False)
+    viff = calc_viff(x1, x2, y, simple=False)
 
     end = time.time()
 
-    print('mean: {:.4f}'.format(mean))
-    print('sd: {:.4f}'.format(sd))
-    print('ag: {:.4f}'.format(ag))
-    print('sf: {:.4f}'.format(sf))
-    print('mse: {:.4f}'.format(mse))
-    print('psnr: {:.4f}'.format(psnr))
-    print('cc: {:.4f}'.format(cc))
-    print('scd: {:.4f}'.format(scd))
-    print('en: {:.4f}'.format(en))
-    print('ce: {:.4f}'.format(ce))
-    print('mi: {:.4f}'.format(mi))
-    print('qabf: {:.4f}'.format(qabf))
-    print('nabf: {:.4f}'.format(nabf))
-    print('labf: {:.4f}'.format(labf))
-    print('ssim: {:.4f}'.format(ssim))
-    print('msssim: {:.4f}'.format(msssim))
-    print('viff: {:.4f}'.format(viff))
+    print(f'mean: {mean.item():.4f}')
+    print(f'sd: {sd.item():.4f}')
+    print(f'ag: {ag.item():.4f}')
+    print(f'sf: {sf.item():.4f}')
+    print(f'mse: {mse.item():.4f}')
+    print(f'psnr: {psnr.item():.4f}')
+    print(f'cc: {cc.item():.4f}')
+    print(f'scd: {scd.item():.4f}')
+    print(f'en: {en.item():.4f}')
+    print(f'ce: {ce.item():.4f}')
+    print(f'mi: {mi.item():.4f}')
+    print(f'qabf: {qabf.item():.4f}')
+    print(f'nabf: {nabf.item():.4f}')
+    print(f'labf: {labf.item():.4f}')
+    print(f'ssim: {ssim.item():.4f}')
+    print(f'msssim: {msssim.item():.4f}')
+    print(f'viff: {viff.item():.4f}')
     print('-' * 16)
-    print('time: {:.3f}s'.format(end - start))
+    print(f'time: {end - start:.3f}s')

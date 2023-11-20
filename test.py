@@ -52,13 +52,17 @@ def test_model(model, data_loader, save_dir=None):
             avg_ssim = (ssim1 + ssim2) * 0.5
             ssim.update(avg_ssim.item())
 
-        print('iter: {:0>2}, ssim: {:.4f}, time: {:.3f}ms'.format(
-            iter_idx, ssim.val, timer.val * 1000))
+        print(
+            f'iter: {iter_idx:0>2}, ssim: {ssim.val:.4f}, time: {timer.val * 1000:.3f}ms'
+        )
+        file.write(
+            f'\niter: {iter_idx:0>2}, ssim: {ssim.val:.4f}, time: {timer.val * 1000:.3f}ms'
+        )
 
         if save_dir is not None:
             # result = save_result(imgf[0], img1[0], img2[0])
             result = save_result(imgf[0])
-            file_name = '{:0>2}.png'.format(iter_idx)
+            file_name = f'{iter_idx:0>2}.bmp'
             cv2.imwrite(os.path.join(save_dir, file_name), result)
 
     return ssim.avg, timer.avg
@@ -81,13 +85,20 @@ if __name__ == '__main__':
     # ckpt_path = os.path.join(ckpt_dir, 'epoch_last.pth')
     assert os.path.isfile(ckpt_path)
 
+    log_path = os.path.join(ckpt_dir, 'train.log')
+    assert os.path.isfile(log_path)
+
     test_save_dir = os.path.join(ckpt_dir, 'test')
     if not os.path.isdir(test_save_dir):
         os.makedirs(test_save_dir)
 
     # 1. data
-    # test_set = Dataset(data_dir, set_name='test', set_type='test')
-    test_set = Dataset(data_dir, set_type='test')
+    if args.data in ['tno']:
+        set_name = None
+    elif args.data in ['roadscene', 'msrs', 'polar']:
+        set_name = 'test'
+
+    test_set = Dataset(data_dir, set_name=set_name, set_type='test')
     test_loader = DataLoader(
         test_set,
         batch_size=1,
@@ -101,32 +112,46 @@ if __name__ == '__main__':
     #     PFNetv1, PFNetv2, DeepFuse, DenseFuse, VIFNet, DBNet, SEDRFuse,
     #     NestFuse, RFNNest, UNFusion, Res2Fusion, MAFusion, IFCNN, DIFNet, PMGI
     # ]
-    #
+
     # model = models[7]
-    # print('model: {}'.format(model.__name__))
-    #
+    # print(f'model: {model.__name__}')
+
     # model = model().to(device, non_blocking=True)
 
     encoders = [
-        ConvBlock, SepConvBlock, MixConvBlock, Res2ConvBlock, ConvFormerBlock,
-        MixFormerBlock, Res2FormerBlock
+        SepConvBlock, MixConvBlock, Res2ConvBlock, ConvFormerBlock,
+        MixFormerBlock, Res2FormerBlock, TransformerBlock
     ]
-    decoders = [NestDecoder, LSDecoder, FSDecoder]
+    decoders = [LSDecoder, NestDecoder, FSDecoder]
 
-    encoder, decoder = encoders[0], decoders[0]
-    print('encoder: {}, decoder: {}'.format(encoder.__name__,
-                                            decoder.__name__))
+    # encoder = [encoders[-2], encoders[-2], encoders[-1], encoders[-1]]
+    encoder = encoders[0]
+    decoder = decoders[0]
+
+    if not isinstance(encoder, list):
+        print(f'encoder: {encoder.__name__}')
+    else:
+        [print(f'encoder{i + 1}: {e.__name__}') for i, e in enumerate(encoder)]
+
+    print(f'decoder: {decoder.__name__}')
 
     model = MyFusion(encoder, decoder,
                      share_weight_levels=4).to(device, non_blocking=True)
 
     params = sum([param.nelement() for param in model.parameters()])
-    print('params: {:.3f}M'.format(params / 1e6))
+    print(f'params: {params / 1e6:.3f}M')
 
     model.load_state_dict(torch.load(ckpt_path, map_location=device),
                           strict=False)
     model.eval()
 
     # 3. test
-    ssim, avg_time = test_model(model, test_loader, test_save_dir)
-    print('ssim: {:.4f}, fps: {:.3f}'.format(ssim, 1.0 / avg_time))
+    with open(log_path, 'a') as file:
+        ssim, avg_time = test_model(model, test_loader, test_save_dir)
+
+        print(
+            f'ssim: {ssim:.4f}, time: {avg_time * 1000:.3f}ms, fps: {1.0 / avg_time:.3f}'
+        )
+        file.write(
+            f'\nssim: {ssim:.4f}, time: {avg_time * 1000:.3f}ms, fps: {1.0 / avg_time:.3f}'
+        )

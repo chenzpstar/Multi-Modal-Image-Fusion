@@ -96,20 +96,21 @@ def spatial_pooling(tensor, mode='l1'):
     elif mode == 'nl':
         b, c, h, w = tensor.shape
 
-        q = tensor.view(b, c, -1).permute(0, 2, 1)  # [B,(HW),C]
-        k = F.avg_pool2d(tensor, 8, 8).view(b, c, -1)  # [B,C,(HW//64)]
-        energy = torch.bmm(q, k)  # [B,(HW),(HW//64)]
+        q = tensor.reshape(b, c, -1).permute(0, 2, 1)  # [B,(HW),C]
+        k = F.avg_pool2d(tensor, 8, 8).reshape(b, c, -1)  # [B,C,(HW//64)]
+        energy = q @ k  # [B,(HW),(HW//64)]
 
         energy_min = torch.min(energy)
         energy_max = torch.max(energy)
         energy_norm = (energy - energy_min) / (energy_max - energy_min)
         energy_softmax = F.softmax(energy_norm, dim=-1)
 
-        v = F.avg_pool2d(tensor, 8,
-                         8).view(b, c, -1).permute(0, 2, 1)  # [B,(HW//64),C]
-        att = torch.bmm(energy_softmax, v)  # [B,(HW),C]
+        v = F.avg_pool2d(tensor, 8, 8).reshape(b, c,
+                                               -1).permute(0, 2,
+                                                           1)  # [B,(HW//64),C]
+        attn = energy_softmax @ v  # [B,(HW),C]
 
-        return att.permute(0, 2, 1).view(b, c, h, w) + tensor
+        return attn.permute(0, 2, 1).reshape(b, c, h, w) + tensor
 
     else:
         raise ValueError(
@@ -134,19 +135,19 @@ def channel_pooling(tensor, mode='avg'):
         return vector
 
     elif mode == 'nl':
-        q = tensor.view(b, c, -1)  #[B,C,(HW)]
-        k = tensor.view(b, c, -1).permute(0, 2, 1)  #[B,(HW),C]
-        energy = torch.bmm(q, k)  #[B,C,C]
+        q = tensor.reshape(b, c, -1)  #[B,C,(HW)]
+        k = tensor.reshape(b, c, -1).permute(0, 2, 1)  #[B,(HW),C]
+        energy = q @ k  #[B,C,C]
 
         energy_min = torch.min(energy)
         energy_max = torch.max(energy)
         energy_norm = (energy - energy_min) / (energy_max - energy_min)
         energy_softmax = F.softmax(energy_norm, dim=-1)
 
-        v = tensor.view(b, c, -1)  #[B,C,(HW)]
-        att = torch.bmm(energy_softmax, v)  #[B,C,(HW)]
+        v = tensor.reshape(b, c, -1)  #[B,C,(HW)]
+        attn = energy_softmax @ v  #[B,C,(HW)]
 
-        return att.view(b, c, h, w) + tensor
+        return attn.reshape(b, c, h, w) + tensor
 
     else:
         raise ValueError("only supported ['avg', 'max', 'nuclear', 'nl'] mode")

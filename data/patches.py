@@ -81,15 +81,15 @@ class FusionPatches(Dataset):
         img_info1, img_info2 = [], []
 
         if self.set_name is None:
-            img_dir = os.path.join(self.root_dir, 'vi')
+            img_dir = os.path.join(self.root_dir, 'vis')
         else:
-            img_dir = os.path.join(self.root_dir, self.set_name, 'vi')
+            img_dir = os.path.join(self.root_dir, self.set_name, 'vis')
 
         for img in natsorted(os.listdir(img_dir)):
             if img.endswith('.bmp') or img.endswith('.jpg') or img.endswith(
                     '.png'):
                 img1_path = os.path.join(img_dir, img)
-                img2_path = img1_path.replace('vi', self.img_type)
+                img2_path = img1_path.replace('vis', self.img_type)
 
                 if os.path.isfile(img2_path):
                     img_info1.append(img1_path)
@@ -97,7 +97,7 @@ class FusionPatches(Dataset):
 
         if self.set_type in ('train', 'valid'):
             train_img1_path, valid_img1_path, train_img2_path, valid_img2_path = train_test_split(
-                img_info1, img_info2, test_size=0.25, random_state=0)
+                img_info1, img_info2, test_size=0.2, random_state=0)
             self.train_data_info = list(zip(train_img1_path, train_img2_path))
             self.valid_data_info = list(zip(valid_img1_path, valid_img2_path))
         else:

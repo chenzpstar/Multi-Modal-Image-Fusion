@@ -93,15 +93,15 @@ class FusionDataset(Dataset):
         img1_info, img2_info = [], []
 
         if self.set_name is None:
-            img_dir = os.path.join(self.root_dir, 'vi')
+            img_dir = os.path.join(self.root_dir, 'vis')
         else:
-            img_dir = os.path.join(self.root_dir, self.set_name, 'vi')
+            img_dir = os.path.join(self.root_dir, self.set_name, 'vis')
 
         for img in natsorted(os.listdir(img_dir)):
             if img.endswith('.bmp') or img.endswith('.jpg') or img.endswith(
                     '.png'):
                 img1_path = os.path.join(img_dir, img)
-                img2_path = img1_path.replace('vi', self.img_type)
+                img2_path = img1_path.replace('vis', self.img_type)
 
                 if os.path.isfile(img2_path):
                     img1_info.append(img1_path)
@@ -109,7 +109,7 @@ class FusionDataset(Dataset):
 
         if self.set_type in ('train', 'valid'):
             train_img1_path, valid_img1_path, train_img2_path, valid_img2_path = train_test_split(
-                img1_info, img2_info, test_size=0.25, random_state=0)
+                img1_info, img2_info, test_size=0.2, random_state=0)
             self.train_data_info = list(zip(train_img1_path, train_img2_path))
             self.valid_data_info = list(zip(valid_img1_path, valid_img2_path))
         else:
@@ -165,11 +165,11 @@ class AEDataset(Dataset):
 
     def _get_data_info(self):
         if self.set_name is None:
-            img1_dir = os.path.join(self.root_dir, 'vi')
+            img1_dir = os.path.join(self.root_dir, 'vis')
         else:
-            img1_dir = os.path.join(self.root_dir, self.set_name, 'vi')
+            img1_dir = os.path.join(self.root_dir, self.set_name, 'vis')
 
-        img2_dir = img1_dir.replace('vi', self.img_type)
+        img2_dir = img1_dir.replace('vis', self.img_type)
 
         for img in natsorted(os.listdir(img1_dir)):
             if img.endswith('.bmp') or img.endswith('.jpg') or img.endswith(
@@ -201,11 +201,11 @@ if __name__ == '__main__':
     # flag = 1
 
     if flag == 0:
-        test_path = os.path.join(BASE_DIR, 'samples', 'polar')
+        test_path = os.path.join(BASE_DIR, 'samples', 'infrared')
         test_set = FusionDataset(test_path,
                                  set_name='test',
                                  set_type='test',
-                                 img_type='po',
+                                 img_type='ir',
                                  norm='min-max',
                                  transform=True,
                                  fix_size=True)

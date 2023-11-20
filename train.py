@@ -111,20 +111,20 @@ def train_model(model,
 
             if iter_idx % 10 == 0:
                 logger.info(
-                    'epoch: {:0>2}, iter: {:0>3}, {} loss: {:.4f}'.format(
-                        epoch_idx, iter_idx, mode, loss.avg))
+                    f'epoch: {epoch_idx:0>2}, iter: {iter_idx:0>3}, {mode} loss: {loss.avg:.4f}'
+                )
 
     if torch.cuda.is_available():
         torch.cuda.synchronize(device)
     cost_time = time.time() - start_time
 
     if local_rank == 0:
-        logger.info('cost time: {:.3f}s\n'.format(cost_time))
+        logger.info(f'cost time: {cost_time:.3f}s\n')
 
         if save_dir is not None:
             result = save_result(imgf[0], img1[0], img2[0])
             # result = save_result(imgf[0])
-            file_name = '{:0>2}.png'.format(epoch_idx)
+            file_name = f'{epoch_idx:0>2}.png'
             cv2.imwrite(os.path.join(save_dir, file_name), result)
 
     if is_distributed:
@@ -149,8 +149,8 @@ if __name__ == '__main__':
     milestones = (round(args.epoch * 2 / 3), round(args.epoch * 8 / 9))
 
     is_distributed = args.local_world_size > 1
-    logger.info('rank: {}, wolrd size: {}'.format(args.local_rank,
-                                                  args.local_world_size))
+    logger.info(
+        f'rank: {args.local_rank}, wolrd size: {args.local_world_size}')
 
     if is_distributed:
         setup_dist(args.local_rank, args.local_world_size)
@@ -159,7 +159,7 @@ if __name__ == '__main__':
     else:
         local_rank = args.local_rank
         device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    logger.info('training on device: {}'.format(device))
+    logger.info(f'training on device: {device}')
 
     data_dir = os.path.join(BASE_DIR, '..', 'datasets', args.data)
     assert os.path.isdir(data_dir)
@@ -178,9 +178,9 @@ if __name__ == '__main__':
             os.makedirs(valid_save_dir)
 
     # 1. data
-    if args.data in ['tno', 'roadscene']:
+    if args.data in ['tno']:
         set_name = None
-    elif args.data in ['msrs', 'polar']:
+    elif args.data in ['roadscene', 'msrs', 'polar']:
         set_name = 'train'
 
     if args.use_patches:
@@ -226,30 +226,40 @@ if __name__ == '__main__':
     #     PFNetv1, PFNetv2, DeepFuse, DenseFuse, VIFNet, DBNet, SEDRFuse,
     #     NestFuse, RFNNest, UNFusion, Res2Fusion, MAFusion, IFCNN, DIFNet, PMGI
     # ]
-    #
+
     # model = models[7]
     # if local_rank == 0:
-    #     logger.info('model: {}'.format(model.__name__))
-    #
+    #     logger.info(f'model: {model.__name__}')
+
     # model = model().to(device, non_blocking=True)
 
     encoders = [
-        ConvBlock, SepConvBlock, MixConvBlock, Res2ConvBlock, ConvFormerBlock,
-        MixFormerBlock, Res2FormerBlock
+        SepConvBlock, MixConvBlock, Res2ConvBlock, ConvFormerBlock,
+        MixFormerBlock, Res2FormerBlock, TransformerBlock
     ]
-    decoders = [NestDecoder, LSDecoder, FSDecoder]
+    decoders = [LSDecoder, NestDecoder, FSDecoder]
 
-    encoder, decoder = encoders[0], decoders[0]
+    # encoder = [encoders[-2], encoders[-2], encoders[-1], encoders[-1]]
+    encoder = encoders[0]
+    decoder = decoders[0]
+
     if local_rank == 0:
-        logger.info('encoder: {}, decoder: {}'.format(encoder.__name__,
-                                                      decoder.__name__))
+        if not isinstance(encoder, list):
+            logger.info(f'encoder: {encoder.__name__}')
+        else:
+            [
+                logger.info(f'encoder{i + 1}: {e.__name__}')
+                for i, e in enumerate(encoder)
+            ]
+
+        logger.info(f'decoder: {decoder.__name__}')
 
     model = MyFusion(encoder, decoder,
                      share_weight_levels=4).to(device, non_blocking=True)
 
     if local_rank == 0:
         params = sum([param.numel() for param in model.parameters()])
-        logger.info('params: {:.3f}M'.format(params / 1e6))
+        logger.info(f'params: {params / 1e6:.3f}M')
 
     if is_distributed:
         tmp_path = os.path.join(ckpt_dir, 'init_weights.pth')
@@ -259,8 +269,8 @@ if __name__ == '__main__':
 
         dist.barrier()
         model.load_state_dict(
-            torch.load(tmp_path,
-                       map_location={'cuda:0': 'cuda:{}'.format(local_rank)}))
+            torch.load(tmp_path, map_location={'cuda:0':
+                                               f'cuda:{local_rank}'}))
 
         model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
         model = DDP(model, device_ids=[local_rank])
@@ -276,10 +286,9 @@ if __name__ == '__main__':
     pixel_mode, pixel_weight = norm_modes[0], weights[2]
     grad_mode, grad_weight = norm_modes[0], weights[1]
     if local_rank == 0:
-        logger.info('ssim mode: {}, weight: {}'.format(ssim_mode, ssim_weight))
-        logger.info('pixel mode: {}, weight: {}'.format(
-            pixel_mode, pixel_weight))
-        logger.info('grad mode: {}, weight: {}'.format(grad_mode, grad_weight))
+        logger.info(f'ssim mode: {ssim_mode}, weight: {ssim_weight}')
+        logger.info(f'pixel mode: {pixel_mode}, weight: {pixel_weight}')
+        logger.info(f'grad mode: {grad_mode}, weight: {grad_weight}')
 
     loss_fn1 = SSIMLoss(ssim_mode, weight=ssim_weight)
     loss_fn2 = PixelLoss(pixel_mode, weight=pixel_weight)
@@ -299,8 +308,9 @@ if __name__ == '__main__':
         epoch_idx = epoch + 1
 
         if local_rank == 0:
-            logger.info('Epoch: [{:0>2}/{:0>2}], lr: {:.2e}'.format(
-                epoch_idx, num_epochs, optimizer.param_groups[0]['lr']))
+            logger.info(
+                f'Epoch: [{epoch_idx:0>2}/{num_epochs:0>2}], lr: {optimizer.param_groups[0]["lr"]:.2e}'
+            )
             logger.info('-' * 16)
 
         if is_distributed:
@@ -324,8 +334,8 @@ if __name__ == '__main__':
             writer.add_scalar('valid_loss_epoch', valid_loss, epoch)
 
             logger.info(
-                'epoch: {:0>2}, train loss: {:.4f}, valid loss: {:.4f}\n'.
-                format(epoch_idx, train_loss, valid_loss))
+                f'epoch: {epoch_idx:0>2}, train loss: {train_loss:.4f}, valid loss: {valid_loss:.4f}\n'
+            )
 
             if epoch < num_epochs // 2:
                 continue
@@ -352,8 +362,8 @@ if __name__ == '__main__':
 
         writer.close()
         logger.info(
-            'training model done, best loss: {:.4f} in epoch: {}'.format(
-                best_loss, best_epoch))
+            f'training model done, best loss: {best_loss:.4f} in epoch: {best_epoch}'
+        )
 
     if is_distributed:
         dist.destroy_process_group()

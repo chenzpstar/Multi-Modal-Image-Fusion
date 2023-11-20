@@ -219,8 +219,8 @@ class DBNet(_FusionModel):
             ConvLayer(32, 64, stride=2),
             ConvLayer(64, 128, stride=2),
             ConvLayer(128, 64, stride=2),
-            Upsample(mode='bilinear', scale_factor=8),
         )
+        self.up = Upsample(mode='bilinear', scale_factor=8)
         self.decode = nn.Sequential(
             ConvLayer(128, 64),
             ConvLayer(64, 32),
@@ -231,7 +231,7 @@ class DBNet(_FusionModel):
     def encoder(self, img):
         feat = self.encode(img)
         feat1 = self.detail(feat)
-        feat2 = self.semantic(feat)
+        feat2 = self.up(self.semantic(feat), feat.shape)
 
         return concat_fusion((feat1, feat2))
 
@@ -249,14 +249,27 @@ class SEDRFuse(nn.Module):
     def __init__(self):
         super(SEDRFuse, self).__init__()
         self.encode = nn.ModuleList([
-            ConvLayer(1, 64, norm='in'),
-            ConvLayer(64, 128, stride=2, norm='in'),
-            ConvLayer(128, 256, stride=2, norm='in'),
-            ResBlock(256, 256, norm1='in', norm2='in'),
+            ConvLayer(1, 64, norm=nn.GroupNorm),
+            ConvLayer(64, 128, stride=2, norm=nn.GroupNorm),
+            ConvLayer(128, 256, stride=2, norm=nn.GroupNorm),
+            ResBlock(256,
+                     256,
+                     norm1=nn.GroupNorm,
+                     norm2=nn.GroupNorm),
         ])
         self.decode = nn.ModuleList([
-            DeconvLayer(256, 128, stride=2, output_padding=1, norm='in'),
-            DeconvLayer(128, 64, stride=2, output_padding=1, norm='in'),
+            ConvLayer(256,
+                      128,
+                      stride=2,
+                      output_padding=1,
+                      norm=nn.GroupNorm,
+                      layer=nn.ConvTranspose2d),
+            ConvLayer(128,
+                      64,
+                      stride=2,
+                      output_padding=1,
+                      norm=nn.GroupNorm,
+                      layer=nn.ConvTranspose2d),
             ConvLayer(64, 1),
         ])
 
@@ -463,13 +476,13 @@ class Res2Fusion(_FusionModel):
 
         return x
 
-    def fusion(self, feat1, feat2, mode='att', spatial='nl', channel='nl'):
-        if mode == 'elm':
+    def fusion(self, feat1, feat2, mode='attn', spatial='nl', channel='nl'):
+        if mode == 'elem':
             return element_fusion(feat1, feat2, 'mean')
-        elif mode == 'att':
+        elif mode == 'attn':
             return attention_fusion(feat1, feat2, 'mean', spatial, channel)
         else:
-            raise ValueError("only supported ['elm', 'att'] mode")
+            raise ValueError("only supported ['elem', 'attn'] mode")
 
 
 class MAFusion(NestFuse):
@@ -517,10 +530,10 @@ class IFCNN(_FusionModel):
         super(IFCNN, self).__init__()
         self.encode = nn.Sequential(
             ConvLayer(1, 64, ksize=7, act=None),
-            ConvLayer(64, 64, norm='bn'),
+            ConvLayer(64, 64, norm=nn.BatchNorm2d),
         )
         self.decode = nn.Sequential(
-            ConvLayer(64, 64, norm='bn'),
+            ConvLayer(64, 64, norm=nn.BatchNorm2d),
             ConvLayer(64, 1, ksize=1, act=None),
         )
 
@@ -534,14 +547,14 @@ class DIFNet(_FusionModel):
         super(DIFNet, self).__init__()
         self.encode = nn.Sequential(
             ConvLayer(1, 16),
-            ResBlock(16, 16, norm1='bn'),
-            ResBlock(16, 16, norm1='bn'),
+            ResBlock(16, 16, norm1=nn.BatchNorm2d),
+            ResBlock(16, 16, norm1=nn.BatchNorm2d),
         )
         self.fuse = ConvLayer(32, 16, act=None)
         self.decode = nn.Sequential(
-            ResBlock(16, 16, norm1='bn'),
-            ResBlock(16, 16, norm1='bn'),
-            ResBlock(16, 16, norm1='bn'),
+            ResBlock(16, 16, norm1=nn.BatchNorm2d),
+            ResBlock(16, 16, norm1=nn.BatchNorm2d),
+            ResBlock(16, 16, norm1=nn.BatchNorm2d),
             ConvLayer(16, 1, act=None),
         )
 
@@ -557,26 +570,26 @@ class PMGI(nn.Module):
     def __init__(self):
         super(PMGI, self).__init__()
         self.gradient = nn.ModuleList([
-            ConvLayer(3, 16, ksize=5, norm='bn', act='lrelu'),
-            ConvLayer(16, 16, norm='bn', act='lrelu'),
-            ConvLayer(48, 16, norm='bn', act='lrelu'),
-            ConvLayer(64, 16, norm='bn', act='lrelu'),
+            ConvLayer(3, 16, ksize=5, norm=nn.BatchNorm2d, act=nn.LeakyReLU),
+            ConvLayer(16, 16, norm=nn.BatchNorm2d, act=nn.LeakyReLU),
+            ConvLayer(48, 16, norm=nn.BatchNorm2d, act=nn.LeakyReLU),
+            ConvLayer(64, 16, norm=nn.BatchNorm2d, act=nn.LeakyReLU),
         ])
         self.intensity = nn.ModuleList([
-            ConvLayer(3, 16, ksize=5, norm='bn', act='lrelu'),
-            ConvLayer(16, 16, norm='bn', act='lrelu'),
-            ConvLayer(48, 16, norm='bn', act='lrelu'),
-            ConvLayer(64, 16, norm='bn', act='lrelu'),
+            ConvLayer(3, 16, ksize=5, norm=nn.BatchNorm2d, act=nn.LeakyReLU),
+            ConvLayer(16, 16, norm=nn.BatchNorm2d, act=nn.LeakyReLU),
+            ConvLayer(48, 16, norm=nn.BatchNorm2d, act=nn.LeakyReLU),
+            ConvLayer(64, 16, norm=nn.BatchNorm2d, act=nn.LeakyReLU),
         ])
         self.transfer1 = nn.ModuleList([
-            ConvLayer(32, 16, ksize=1, norm='bn', act='lrelu'),
-            ConvLayer(32, 16, ksize=1, norm='bn', act='lrelu'),
+            ConvLayer(32, 16, ksize=1, norm=nn.BatchNorm2d, act=nn.LeakyReLU),
+            ConvLayer(32, 16, ksize=1, norm=nn.BatchNorm2d, act=nn.LeakyReLU),
         ])
         self.transfer2 = nn.ModuleList([
-            ConvLayer(32, 16, ksize=1, norm='bn', act='lrelu'),
-            ConvLayer(32, 16, ksize=1, norm='bn', act='lrelu'),
+            ConvLayer(32, 16, ksize=1, norm=nn.BatchNorm2d, act=nn.LeakyReLU),
+            ConvLayer(32, 16, ksize=1, norm=nn.BatchNorm2d, act=nn.LeakyReLU),
         ])
-        self.decode = ConvLayer(128, 1, ksize=1, act='tanh')
+        self.decode = ConvLayer(128, 1, ksize=1, act=nn.Tanh)
 
     def encoder(self, img1, img2):
         x1 = concat_fusion((img1, img1, img2))
@@ -629,8 +642,10 @@ class PMGI(nn.Module):
 
 class MyFusion(nn.Module):
     def __init__(self,
-                 encoder=ConvBlock,
+                 encoder=SepConvBlock,
                  decoder=NestDecoder,
+                 norm=None,
+                 act=nn.ReLU6,
                  down_mode='stride',
                  up_mode='bilinear',
                  share_weight_levels=4):
@@ -639,7 +654,13 @@ class MyFusion(nn.Module):
         self.share_weight_levels = share_weight_levels
 
         # encoder
-        self.down1_1 = TransitionBlock(1, num_ch[0], stride=1)
+        self.conv_in_1 = ConvLayer(1,
+                                   8,
+                                   ksize=1,
+                                   bias=False,
+                                   norm=norm,
+                                   act=act)
+        self.down1_1 = TransitionBlock(8, num_ch[0], stride=1)
         self.down2_1 = TransitionBlock(num_ch[0],
                                        num_ch[1],
                                        down_mode=down_mode)
@@ -651,7 +672,13 @@ class MyFusion(nn.Module):
                                        down_mode=down_mode)
 
         if share_weight_levels < 4:
-            self.down1_2 = TransitionBlock(1, num_ch[0], stride=1)
+            self.conv_in_2 = ConvLayer(1,
+                                       8,
+                                       ksize=1,
+                                       bias=False,
+                                       norm=norm,
+                                       act=act)
+            self.down1_2 = TransitionBlock(8, num_ch[0], stride=1)
         if share_weight_levels < 3:
             self.down2_2 = TransitionBlock(num_ch[0],
                                            num_ch[1],
@@ -665,71 +692,79 @@ class MyFusion(nn.Module):
                                            num_ch[3],
                                            down_mode=down_mode)
 
-        self.EB1_1 = encoder(num_ch[0], num_ch[0])
-        self.EB2_1 = encoder(num_ch[1], num_ch[1])
-        self.EB3_1 = encoder(num_ch[2], num_ch[2])
-        self.EB4_1 = encoder(num_ch[3], num_ch[3])
+        if not isinstance(encoder, list):
+            encoder = [encoder] * 4
+
+        self.EB1_1 = encoder[0](num_ch[0], num_ch[0])
+        self.EB2_1 = encoder[1](num_ch[1], num_ch[1])
+        self.EB3_1 = encoder[2](num_ch[2], num_ch[2])
+        self.EB4_1 = encoder[3](num_ch[3], num_ch[3])
 
         if share_weight_levels < 4:
-            self.EB1_2 = encoder(num_ch[0], num_ch[0])
+            self.EB1_2 = encoder[0](num_ch[0], num_ch[0])
         if share_weight_levels < 3:
-            self.EB2_2 = encoder(num_ch[1], num_ch[1])
+            self.EB2_2 = encoder[1](num_ch[1], num_ch[1])
         if share_weight_levels < 2:
-            self.EB3_2 = encoder(num_ch[2], num_ch[2])
+            self.EB3_2 = encoder[2](num_ch[2], num_ch[2])
         if share_weight_levels < 1:
-            self.EB4_2 = encoder(num_ch[3], num_ch[3])
+            self.EB4_2 = encoder[3](num_ch[3], num_ch[3])
 
         # decoder
-        self.decode = decoder(ConvBlock, num_ch, up_mode)
-        self.conv_out = ConvLayer(num_ch[0], 1, ksize=1, act='relu')
+        self.decode = decoder(DCBlock, num_ch, up_mode)
+        self.conv_out = ConvLayer(num_ch[0],
+                                  1,
+                                  ksize=1,
+                                  bias=False,
+                                  norm=norm,
+                                  act=act)
 
     def encoder(self, img1, img2):
-        x1_1 = self.EB1_1(self.down1_1(img1))
+        x1_1 = self.EB1_1(self.down1_1(self.conv_in_1(img1)))
         x2_1 = self.EB2_1(self.down2_1(x1_1))
         x3_1 = self.EB3_1(self.down3_1(x2_1))
         x4_1 = self.EB4_1(self.down4_1(x3_1))
 
         if self.share_weight_levels == 4:
-            x1_2 = self.EB1_1(self.down1_1(img2))
+            x1_2 = self.EB1_1(self.down1_1(self.conv_in_1(img2)))
             x2_2 = self.EB2_1(self.down2_1(x1_2))
             x3_2 = self.EB3_1(self.down3_1(x2_2))
             x4_2 = self.EB4_1(self.down4_1(x3_2))
         elif self.share_weight_levels == 3:
-            x1_2 = self.EB1_2(self.down1_2(img2))
+            x1_2 = self.EB1_2(self.down1_2(self.conv_in_2(img2)))
             x2_2 = self.EB2_1(self.down2_1(x1_2))
             x3_2 = self.EB3_1(self.down3_1(x2_2))
             x4_2 = self.EB4_1(self.down4_1(x3_2))
         elif self.share_weight_levels == 2:
-            x1_2 = self.EB1_2(self.down1_2(img2))
+            x1_2 = self.EB1_2(self.down1_2(self.conv_in_2(img2)))
             x2_2 = self.EB2_2(self.down2_2(x1_2))
             x3_2 = self.EB3_1(self.down3_1(x2_2))
             x4_2 = self.EB4_1(self.down4_1(x3_2))
         elif self.share_weight_levels == 1:
-            x1_2 = self.EB1_2(self.down1_2(img2))
+            x1_2 = self.EB1_2(self.down1_2(self.conv_in_2(img2)))
             x2_2 = self.EB2_2(self.down2_2(x1_2))
             x3_2 = self.EB3_2(self.down3_2(x2_2))
             x4_2 = self.EB4_1(self.down4_1(x3_2))
         elif self.share_weight_levels == 0:
-            x1_2 = self.EB1_2(self.down1_2(img2))
+            x1_2 = self.EB1_2(self.down1_2(self.conv_in_2(img2)))
             x2_2 = self.EB2_2(self.down2_2(x1_2))
             x3_2 = self.EB3_2(self.down3_2(x2_2))
             x4_2 = self.EB4_2(self.down4_2(x3_2))
 
         return (x1_1, x2_1, x3_1, x4_1), (x1_2, x2_2, x3_2, x4_2)
 
-    def fusion(self, feats1, feats2, method='att', mode='mean'):
-        if method == 'elm':
+    def fusion(self, feats1, feats2, method='attn', mode='mean'):
+        if method == 'elem':
             f1 = element_fusion(feats1[0], feats2[0], mode)
             f2 = element_fusion(feats1[1], feats2[1], mode)
             f3 = element_fusion(feats1[2], feats2[2], mode)
             f4 = element_fusion(feats1[3], feats2[3], mode)
-        elif method == 'att':
+        elif method == 'attn':
             f1 = attention_fusion(feats1[0], feats2[0], mode)
             f2 = attention_fusion(feats1[1], feats2[1], mode)
             f3 = attention_fusion(feats1[2], feats2[2], mode)
             f4 = attention_fusion(feats1[3], feats2[3], mode)
         else:
-            raise ValueError("only supported ['elm', 'att'] method")
+            raise ValueError("only supported ['elem', 'attn'] method")
 
         return f1, f2, f3, f4
 
@@ -753,6 +788,7 @@ class MyFusion(nn.Module):
 
 if __name__ == '__main__':
 
+    import time
     from thop import clever_format, profile
 
     # models = [
@@ -761,34 +797,53 @@ if __name__ == '__main__':
     # ]
     #
     # model = models[0]
-    # print('model: {}'.format(model.__name__))
+    # print(f'model: {model.__name__}')
     #
     # model = model()
 
     encoders = [
-        ConvBlock, SepConvBlock, MixConvBlock, Res2ConvBlock, ConvFormerBlock,
-        MixFormerBlock, Res2FormerBlock
+        SepConvBlock, MixConvBlock, Res2ConvBlock, ConvFormerBlock,
+        MixFormerBlock, Res2FormerBlock, TransformerBlock
     ]
-    decoders = [NestDecoder, LSDecoder, FSDecoder]
+    decoders = [LSDecoder, NestDecoder, FSDecoder]
 
-    encoder, decoder = encoders[0], decoders[0]
-    print('encoder: {}, decoder: {}'.format(encoder.__name__,
-                                            decoder.__name__))
+    # encoder = [encoders[-2], encoders[-2], encoders[-1], encoders[-1]]
+    encoder = encoders[0]
+    decoder = decoders[0]
 
-    model = MyFusion(encoder, decoder, share_weight_levels=2)
+    if not isinstance(encoder, list):
+        print(f'encoder: {encoder.__name__}')
+    else:
+        [print(f'encoder{i + 1}: {e.__name__}') for i, e in enumerate(encoder)]
+
+    print(f'decoder: {decoder.__name__}')
+
+    model = MyFusion(encoder, decoder, share_weight_levels=4)
 
     params = sum([param.numel() for param in model.parameters()])
-    print('params: {:.3f}M'.format(params / 1e6))
+    print(f'params: {params / 1e6:.3f}M')
 
     # print(model)
 
-    x1 = torch.rand(2, 1, 256, 256)
-    x2 = torch.rand(2, 1, 256, 256)
+    x1 = torch.rand(1, 1, 256, 256)
+    x2 = torch.rand(1, 1, 256, 256)
 
     flops, params = profile(model, inputs=(x1, x2))
     flops, params = clever_format([flops, params], '%.3f')
-    print('params: {}, flops: {}'.format(params, flops))
+    print(f'params: {params}, flops: {flops}')
 
-    # out = model(x1)
-    out = model(x1, x2)
-    print(out.shape)
+    # # out = model(x1)
+    # out = model(x1, x2)
+    # print(out.shape)
+
+    t = 0.0
+    for i in range(51):
+        if i > 0:
+            t0 = time.time()
+
+        with torch.no_grad():
+            out = model(x1, x2)
+
+        if i > 0:
+            t += time.time() - t0
+    print(f'time: {t / 50 * 1000:.3f}ms')

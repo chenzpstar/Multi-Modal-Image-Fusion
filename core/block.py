@@ -8,7 +8,6 @@
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 try:
     from .fusion import concat_fusion
@@ -16,10 +15,11 @@ except:
     from fusion import concat_fusion
 
 __all__ = [
-    'ConvLayer', 'DeconvLayer', 'ResBlock', 'DenseBlock', 'SepConvBlock',
-    'MixConvBlock', 'Res2ConvBlock', 'ConvFormerBlock', 'MixFormerBlock',
-    'Res2FormerBlock', 'TransitionBlock', 'ConvBlock', 'ECB', 'DCB', 'RFN',
-    'NestEncoder', 'NestDecoder', 'LSDecoder', 'FSDecoder', 'Upsample'
+    'ConvLayer', 'ResBlock', 'DenseBlock', 'SepConvBlock', 'MixConvBlock',
+    'Res2ConvBlock', 'Attention', 'ConvFormerBlock', 'MixFormerBlock',
+    'Res2FormerBlock', 'TransformerBlock', 'TransitionBlock', 'DCBlock',
+    'ConvBlock', 'ECB', 'DCB', 'RFN', 'NestEncoder', 'LSDecoder',
+    'NestDecoder', 'FSDecoder', 'Downsample', 'Upsample'
 ]
 
 
@@ -35,25 +35,27 @@ class ConvLayer(nn.Module):
                  bias=None,
                  norm=None,
                  pre_norm=None,
-                 act='relu',
+                 layer=nn.Conv2d,
+                 act=nn.ReLU,
                  padding_mode='reflect'):
         super(ConvLayer, self).__init__()
         if padding is None:
             padding = ksize // 2
         if bias is None:
-            bias = (norm != 'bn') or (pre_norm != 'bn')
+            bias = (norm is not nn.BatchNorm2d) or (pre_norm
+                                                    is not nn.BatchNorm2d)
 
         layers = []
 
-        if pre_norm == 'bn':
-            layers.append(nn.BatchNorm2d(in_ch))
-        elif pre_norm == 'in':
-            layers.append(nn.InstanceNorm2d(in_ch))
-        elif pre_norm == 'ln':
-            layers.append(LayerNorm(in_ch))
+        if pre_norm is not None:
+            if pre_norm is nn.GroupNorm:
+                layers.append(pre_norm(out_ch, out_ch))
+            else:
+                layers.append(pre_norm(out_ch))
 
-        layers.append(
-            nn.Conv2d(in_ch,
+        if layer is nn.Conv2d:
+            layers.append(
+                layer(in_ch,
                       out_ch,
                       ksize,
                       stride,
@@ -62,120 +64,61 @@ class ConvLayer(nn.Module):
                       groups,
                       bias=bias,
                       padding_mode=padding_mode))
+        elif layer is nn.ConvTranspose2d:
+            layers.append(
+                layer(in_ch,
+                      out_ch,
+                      ksize,
+                      stride,
+                      padding,
+                      output_padding=0,
+                      bias=bias,
+                      padding_mode='zeros'))
 
-        if norm == 'bn':
-            layers.append(nn.BatchNorm2d(out_ch))
-        elif norm == 'in':
-            layers.append(nn.InstanceNorm2d(out_ch))
-        elif norm == 'ln':
-            layers.append(LayerNorm(out_ch))
+        if norm is not None:
+            if norm is nn.GroupNorm:
+                layers.append(norm(out_ch, out_ch))
+            else:
+                layers.append(norm(out_ch))
 
-        if act == 'relu':
-            layers.append(nn.ReLU(inplace=True))
-        elif act == 'lrelu':
-            layers.append(nn.LeakyReLU(0.2, inplace=True))
-        elif act == 'tanh':
-            layers.append(nn.Tanh())
+        if act is not None:
+            if act in (nn.ReLU, nn.ReLU6, nn.Hardswish):
+                layers.append(act(inplace=True))
+            elif act is nn.LeakyReLU:
+                layers.append(act(0.2, inplace=True))
+            else:
+                layers.append(act())
 
-        self.conv = nn.Sequential(*layers)
+        self.layers = nn.Sequential(*layers)
         self.norm = norm
         self.pre_norm = pre_norm
         self.act = act
         self._init_weights()
 
     def forward(self, x):
-        return self.conv(x)
+        return self.layers(x)
 
     def _init_weights(self):
         for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                if self.act == 'relu':
+            if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d)):
+                if self.act in (nn.ReLU, nn.ReLU6, nn.Hardswish, nn.SiLU, nn.GELU):
                     nn.init.kaiming_normal_(m.weight)
-                elif self.act == 'lrelu':
+                elif self.act is nn.LeakyReLU:
                     nn.init.kaiming_normal_(m.weight, a=0.2)
-                elif self.act == 'tanh':
-                    nn.init.kaiming_normal_(m.weight, nonlinearity='tanh')
-                else:
-                    nn.init.kaiming_normal_(m.weight, nonlinearity='linear')
+                elif self.act is nn.Tanh:
+                    nn.init.xavier_normal_(m.weight,
+                                           gain=nn.init.calculate_gain('tanh'))
 
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
 
-            elif isinstance(m, (nn.BatchNorm2d, nn.InstanceNorm2d)):
-                nn.init.ones_(m.weight)
-                nn.init.zeros_(m.bias)
-
-
-class DeconvLayer(nn.Module):
-    def __init__(self,
-                 in_ch,
-                 out_ch,
-                 ksize=3,
-                 stride=1,
-                 padding=None,
-                 output_padding=0,
-                 bias=None,
-                 norm=None,
-                 act='relu',
-                 padding_mode='zeros'):
-        super(DeconvLayer, self).__init__()
-        if padding is None:
-            padding = ksize // 2
-        if bias is None:
-            bias = (norm != 'bn')
-
-        layers = [
-            nn.ConvTranspose2d(in_ch,
-                               out_ch,
-                               ksize,
-                               stride,
-                               padding,
-                               output_padding,
-                               bias=bias,
-                               padding_mode=padding_mode)
-        ]
-
-        if norm == 'bn':
-            layers.append(nn.BatchNorm2d(out_ch))
-        elif norm == 'in':
-            layers.append(nn.InstanceNorm2d(out_ch))
-
-        if act == 'relu':
-            layers.append(nn.ReLU(inplace=True))
-        elif act == 'lrelu':
-            layers.append(nn.LeakyReLU(0.2, inplace=True))
-        elif act == 'tanh':
-            layers.append(nn.Tanh())
-
-        self.deconv = nn.Sequential(*layers)
-        self.norm = norm
-        self.act = act
-        self._init_weights()
-
-    def forward(self, x):
-        return self.deconv(x)
-
-    def _init_weights(self):
-        for m in self.modules():
-            if isinstance(m, nn.ConvTranspose2d):
-                if self.act == 'relu':
-                    nn.init.kaiming_normal_(m.weight)
-                elif self.act == 'lrelu':
-                    nn.init.kaiming_normal_(m.weight, a=0.2)
-                elif self.act == 'tanh':
-                    nn.init.kaiming_normal_(m.weight, nonlinearity='tanh')
-                else:
-                    nn.init.kaiming_normal_(m.weight, nonlinearity='linear')
-
-                if m.bias is not None:
-                    nn.init.zeros_(m.bias)
-
-            elif isinstance(m, (nn.BatchNorm2d, nn.InstanceNorm2d)):
+            elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
                 nn.init.ones_(m.weight)
                 nn.init.zeros_(m.bias)
 
 
 class ResBlock(nn.Module):
+    '''Used in SEDRFuse, DIFNet'''
     def __init__(self, in_ch, out_ch, norm1=None, norm2=None):
         super(ResBlock, self).__init__()
         self.in_ch = in_ch
@@ -191,6 +134,7 @@ class ResBlock(nn.Module):
 
 
 class DenseBlock(nn.Module):
+    '''Used in PFNet, DenseFuse, VIFNet, DBNet'''
     def __init__(self, in_ch, out_ch, num_convs=3):
         super(DenseBlock, self).__init__()
         self.in_ch = in_ch
@@ -210,100 +154,115 @@ class SepConvBlock(nn.Module):
     def __init__(self,
                  in_ch,
                  out_ch,
-                 expand_ratio=2,
+                 scale=4,
                  ksize=3,
                  bias=False,
-                 act='relu',
+                 norm=None,
+                 act=nn.ReLU6,
                  residual=True,
                  attention=False):
         super(SepConvBlock, self).__init__()
-        self.residual = residual
-        self.attention = attention
-
-        self.in_ch = in_ch
-        self.out_ch = out_ch
-        self.expand_ratio = expand_ratio
-        hid_ch = in_ch * expand_ratio
-
-        self.pwconv1 = ConvLayer(in_ch, hid_ch, ksize=1, bias=bias, act=act)
-        self.dwconv = ConvLayer(hid_ch,
-                                hid_ch,
-                                ksize=ksize,
-                                groups=hid_ch,
-                                bias=bias,
-                                act=act)
-        self.pwconv2 = ConvLayer(hid_ch, out_ch, ksize=1, bias=bias, act=None)
-
-        self.shortcut = ConvLayer(
-            in_ch, out_ch, ksize=1, bias=bias,
-            act=None) if in_ch != out_ch else nn.Identity()
-
-    def forward(self, x):
-        if self.residual:
-            res = x.clone()
-
-        x = self.pwconv1(x)
-
-        if self.attention:
-            att = x.clone()
-
-        x = self.dwconv(x)
-
-        if self.attention:
-            x *= att
-
-        x = self.pwconv2(x)
-
-        if self.residual:
-            x += self.shortcut(res)
-
-        return F.relu(x)
-
-
-class MixConvBlock(nn.Module):
-    def __init__(self,
-                 in_ch,
-                 out_ch,
-                 scale=4,
-                 bias=False,
-                 act='relu',
-                 residual=True,
-                 attention=False):
-        super(MixConvBlock, self).__init__()
+        self.norm = norm
+        self.act = act()
         self.residual = residual
         self.attention = attention
 
         self.in_ch = in_ch
         self.out_ch = out_ch
         self.scale = scale
-        width = int(in_ch / 2)
-        hid_ch = int(width * scale)
+        hid_ch = in_ch * scale
 
-        self.pwconv1 = ConvLayer(in_ch, hid_ch, ksize=1, bias=bias, act=act)
+        self.pwconv1 = ConvLayer(in_ch,
+                                 hid_ch,
+                                 ksize=1,
+                                 bias=bias,
+                                 norm=norm,
+                                 act=act)
+        self.dwconv = ConvLayer(hid_ch,
+                                hid_ch,
+                                ksize=ksize,
+                                groups=hid_ch,
+                                bias=bias,
+                                norm=norm,
+                                act=None)
+        self.pwconv2 = ConvLayer(hid_ch,
+                                 out_ch,
+                                 ksize=1,
+                                 bias=bias,
+                                 norm=norm,
+                                 act=None)
+
+        if attention:
+            self.pwconv = ConvLayer(in_ch,
+                                    hid_ch,
+                                    ksize=1,
+                                    bias=bias,
+                                    norm=norm,
+                                    act=act)
+
+        if residual:
+            self.shortcut = ConvLayer(
+                in_ch, out_ch, ksize=1, bias=bias, norm=norm,
+                act=None) if in_ch != out_ch else nn.Identity()
+
+    def forward(self, x):
+        if self.residual:
+            res = self.shortcut(x.clone())
+
+        if self.attention:
+            attn = self.pwconv(x.clone())
+
+        out = self.dwconv(self.pwconv1(x))
+
+        if self.attention:
+            out *= attn
+
+        out = self.pwconv2(out)
+
+        if self.residual:
+            out += res
+
+        return self.act(out)
+
+
+class MixConvBlock(SepConvBlock):
+    def __init__(self,
+                 in_ch,
+                 out_ch,
+                 scale=4,
+                 bias=False,
+                 norm=None,
+                 act=nn.ReLU6,
+                 residual=True,
+                 attention=False):
+        super(MixConvBlock, self).__init__(in_ch,
+                                           out_ch,
+                                           scale=scale,
+                                           bias=bias,
+                                           norm=norm,
+                                           act=act,
+                                           residual=residual,
+                                           attention=attention)
+        width = in_ch
+
         self.dwconvs = nn.ModuleList([
             ConvLayer(width,
                       width,
                       ksize=2 * i + 1,
                       groups=width,
                       bias=bias,
-                      act=act) for i in range(scale)
+                      norm=norm,
+                      act=None) for i in range(scale)
         ])
-        self.pwconv2 = ConvLayer(hid_ch, out_ch, ksize=1, bias=bias, act=None)
-
-        self.shortcut = ConvLayer(
-            in_ch, out_ch, ksize=1, bias=bias,
-            act=None) if in_ch != out_ch else nn.Identity()
 
     def forward(self, x):
         if self.residual:
-            res = x.clone()
-
-        x = self.pwconv1(x)
+            res = self.shortcut(x.clone())
 
         if self.attention:
-            att = x.clone()
+            attn = self.pwconv(x.clone())
 
-        xs = torch.chunk(x, self.scale, dim=1)
+        xs = torch.chunk(self.pwconv1(x), self.scale, dim=1)
 
         if self.scale > 1:
             for i in range(self.scale):
@@ -313,60 +272,64 @@ class MixConvBlock(nn.Module):
             out = self.dwconvs[0](xs[0])
 
         if self.attention:
-            out *= att
+            out *= attn
 
         out = self.pwconv2(out)
 
         if self.residual:
-            out += self.shortcut(res)
+            out += res
 
-        return F.relu(out)
+        return self.act(out)
 
 
-class Res2ConvBlock(nn.Module):
+class Res2ConvBlock(SepConvBlock):
     def __init__(self,
                  in_ch,
                  out_ch,
                  scale=4,
                  bias=False,
-                 act='relu',
+                 norm=None,
+                 act=nn.ReLU6,
                  residual=True,
                  attention=False):
-        super(Res2ConvBlock, self).__init__()
-        self.residual = residual
-        self.attention = attention
+        super(Res2ConvBlock, self).__init__(in_ch,
+                                            out_ch,
+                                            scale=scale,
+                                            bias=bias,
+                                            norm=norm,
+                                            act=act,
+                                            residual=residual,
+                                            attention=attention)
+        width = in_ch
 
-        self.in_ch = in_ch
-        self.out_ch = out_ch
-        self.scale = scale
-        width = int(in_ch / 2)
-        hid_ch = int(width * scale)
-
-        self.pwconv1 = ConvLayer(in_ch, hid_ch, ksize=1, bias=bias, act=act)
+        # self.dwconvs = nn.ModuleList([
+        #     ConvLayer(width,
+        #               width,
+        #               ksize=3,
+        #               groups=width,
+        #               bias=bias,
+        #               norm=norm,
+        #               act=None) if i > 0 else nn.Identity()
+        #     for i in range(scale)
+        # ])
         self.dwconvs = nn.ModuleList([
             ConvLayer(width,
                       width,
                       ksize=3 if i > 0 else 1,
                       groups=width,
                       bias=bias,
-                      act=act) for i in range(scale)
+                      norm=norm,
+                      act=None) for i in range(scale)
         ])
-        self.pwconv2 = ConvLayer(hid_ch, out_ch, ksize=1, bias=bias, act=None)
-
-        self.shortcut = ConvLayer(
-            in_ch, out_ch, ksize=1, bias=bias,
-            act=None) if in_ch != out_ch else nn.Identity()
 
     def forward(self, x):
         if self.residual:
-            res = x.clone()
-
-        x = self.pwconv1(x)
+            res = self.shortcut(x.clone())
 
         if self.attention:
-            att = x.clone()
+            attn = self.pwconv(x.clone())
 
-        xs = torch.chunk(x, self.scale, dim=1)
+        xs = torch.chunk(self.pwconv1(x), self.scale, dim=1)
 
         if self.scale > 1:
             for i in range(self.scale):
@@ -377,33 +340,124 @@ class Res2ConvBlock(nn.Module):
             out = self.dwconvs[0](xs[0])
 
         if self.attention:
-            out *= att
+            out *= attn
 
         out = self.pwconv2(out)
 
         if self.residual:
-            out += self.shortcut(res)
+            out += res
 
-        return F.relu(out)
+        return self.act(out)
 
 
-class MLP(nn.Module):
-    def __init__(self, num_ch, mlp_ratio=4, bias=False, act='relu', drop=0.0):
-        super(MLP, self).__init__()
-        self.num_ch = num_ch
-        self.mlp_ratio = mlp_ratio
-        hid_ch = num_ch * mlp_ratio
+class Attention(nn.Module):
+    def __init__(self,
+                 in_ch,
+                 out_ch,
+                 num_heads=None,
+                 qkv_bias=False,
+                 proj_bias=False,
+                 norm=None,
+                 act=None,
+                 sr_ratio=None,
+                 down_mode='stride'):
+        super(Attention, self).__init__()
+        self.in_ch = in_ch
+        self.out_ch = out_ch
 
-        self.fc1 = ConvLayer(num_ch, hid_ch, ksize=1, bias=bias, act=act)
-        self.drop1 = nn.Dropout(drop)
-        self.fc2 = ConvLayer(hid_ch, num_ch, ksize=1, bias=bias, act=act)
-        self.drop2 = nn.Dropout(drop)
+        self.num_heads = num_heads if num_heads else in_ch // 16
+        self.head_dim = in_ch // self.num_heads
+        self.att_dim = self.num_heads * self.head_dim
+
+        self.scale = self.head_dim**-0.5
+
+        self.q = ConvLayer(in_ch,
+                           self.att_dim,
+                           ksize=1,
+                           bias=qkv_bias,
+                           norm=norm,
+                           act=act)
+        self.k = ConvLayer(in_ch,
+                           self.att_dim,
+                           ksize=1,
+                           bias=qkv_bias,
+                           norm=norm,
+                           act=act)
+        self.v = ConvLayer(in_ch,
+                           self.att_dim,
+                           ksize=1,
+                           bias=qkv_bias,
+                           norm=norm,
+                           act=act)
+        self.proj = ConvLayer(self.att_dim,
+                              out_ch,
+                              ksize=1,
+                              bias=proj_bias,
+                              norm=norm,
+                              act=act)
+
+        self.sr_ratio = sr_ratio if sr_ratio else 16 // (in_ch // 16)
+
+        if down_mode == 'stride':
+            self.pool = ConvLayer(in_ch,
+                                  in_ch,
+                                  ksize=self.sr_ratio,
+                                  stride=self.sr_ratio,
+                                  padding=0,
+                                  groups=in_ch,
+                                  bias=False,
+                                  norm=norm,
+                                  act=act)
+        elif down_mode == 'avgpool':
+            self.pool = nn.AvgPool2d(self.sr_ratio, self.sr_ratio)
 
     def forward(self, x):
-        x = self.drop1(self.fc1(x))
-        x = self.drop2(self.fc2(x))
+        b, _, h, w = x.shape
 
-        return x
+        q = self.q(x).flatten(2).reshape(b, self.num_heads, self.head_dim,
+                                         -1).permute(0, 1, 3, 2)
+
+        x_pool = self.pool(x) if self.sr_ratio > 1 else x
+        k = self.k(x_pool).flatten(2).reshape(b, self.num_heads, self.head_dim,
+                                              -1).permute(0, 1, 2, 3)
+        v = self.v(x_pool).flatten(2).reshape(b, self.num_heads, self.head_dim,
+                                              -1).permute(0, 1, 3, 2)
+
+        attn = (q @ k) * self.scale
+        attn = attn.softmax(dim=-1)
+
+        out = (attn @ v).transpose(2, 3).reshape(b, self.att_dim, h, w)
+        out = self.proj(out)
+
+        return out
+
+
+class FFN(nn.Module):
+    def __init__(self,
+                 num_ch,
+                 scale=4,
+                 bias=False,
+                 norm=None,
+                 act=nn.ReLU6):
+        super(FFN, self).__init__()
+        self.num_ch = num_ch
+        self.scale = scale
+        hid_ch = num_ch * scale
+
+        self.layers = nn.Sequential(
+            ConvLayer(num_ch, hid_ch, ksize=1, bias=bias, norm=norm, act=act),
+            ConvLayer(hid_ch,
+                      hid_ch,
+                      ksize=3,
+                      groups=hid_ch,
+                      bias=bias,
+                      norm=norm,
+                      act=act),
+            ConvLayer(hid_ch, num_ch, ksize=1, bias=bias, norm=norm, act=None),
+        )
+
+    def forward(self, x):
+        return self.layers(x)
 
 
 class Scale(nn.Module):
@@ -455,9 +509,9 @@ class MetaFormerBlock(nn.Module):
                  out_ch,
                  token_mixer=nn.Identity,
                  norm_layer=LayerNorm,
+                 act_layer=nn.Identity,
                  layer_scale=None,
-                 res_scale=1.0,
-                 drop=0.0):
+                 res_scale=None):
         super(MetaFormerBlock, self).__init__()
         self.in_ch = in_ch
         self.out_ch = out_ch
@@ -470,30 +524,37 @@ class MetaFormerBlock(nn.Module):
                                 res_scale) if res_scale else nn.Identity()
 
         self.norm2 = norm_layer(out_ch)
-        self.mlp = MLP(out_ch, drop=drop)
+        self.ffn = FFN(out_ch)
         self.layer_scale2 = Scale(
             out_ch, layer_scale) if layer_scale else nn.Identity()
         self.res_scale2 = Scale(out_ch,
                                 res_scale) if res_scale else nn.Identity()
 
-    def forward(self, x):
-        x = self.layer_scale1(self.token_mixer(
-            self.norm1(x))) + self.res_scale1(x)
-        x = self.layer_scale2(self.mlp(self.norm2(x))) + self.res_scale2(x)
+        self.act = act_layer()
 
-        return x
+    def forward(self, x):
+        out = self.act(
+            self.layer_scale1(self.token_mixer(self.norm1(x))) +
+            self.res_scale1(x))
+        out = self.act(
+            self.layer_scale2(self.ffn(self.norm2(out))) +
+            self.res_scale2(out))
+
+        return out
 
 
 class ConvFormerBlock(MetaFormerBlock):
     def __init__(self,
                  in_ch,
                  out_ch,
-                 norm_layer=LayerNorm,
+                 norm_layer=nn.BatchNorm2d,
+                 act_layer=nn.ReLU6,
                  layer_scale=None,
-                 res_scale=1.0):
+                 res_scale=None):
         super(ConvFormerBlock, self).__init__(in_ch,
                                               out_ch,
                                               norm_layer=norm_layer,
+                                              act_layer=act_layer,
                                               layer_scale=layer_scale,
                                               res_scale=res_scale)
         self.token_mixer = SepConvBlock(in_ch,
@@ -506,12 +567,14 @@ class MixFormerBlock(MetaFormerBlock):
     def __init__(self,
                  in_ch,
                  out_ch,
-                 norm_layer=LayerNorm,
+                 norm_layer=nn.BatchNorm2d,
+                 act_layer=nn.ReLU6,
                  layer_scale=None,
-                 res_scale=1.0):
+                 res_scale=None):
         super(MixFormerBlock, self).__init__(in_ch,
                                              out_ch,
                                              norm_layer=norm_layer,
+                                             act_layer=act_layer,
                                              layer_scale=layer_scale,
                                              res_scale=res_scale)
         self.token_mixer = MixConvBlock(in_ch,
@@ -524,12 +587,14 @@ class Res2FormerBlock(MetaFormerBlock):
     def __init__(self,
                  in_ch,
                  out_ch,
-                 norm_layer=LayerNorm,
+                 norm_layer=nn.BatchNorm2d,
+                 act_layer=nn.ReLU6,
                  layer_scale=None,
-                 res_scale=1.0):
+                 res_scale=None):
         super(Res2FormerBlock, self).__init__(in_ch,
                                               out_ch,
                                               norm_layer=norm_layer,
+                                              act_layer=act_layer,
                                               layer_scale=layer_scale,
                                               res_scale=res_scale)
         self.token_mixer = Res2ConvBlock(in_ch,
@@ -538,37 +603,122 @@ class Res2FormerBlock(MetaFormerBlock):
                                          attention=False)
 
 
+class TransformerBlock(MetaFormerBlock):
+    def __init__(self,
+                 in_ch,
+                 out_ch,
+                 norm_layer=nn.BatchNorm2d,
+                 act_layer=nn.ReLU6,
+                 layer_scale=None,
+                 res_scale=None):
+        super(TransformerBlock, self).__init__(in_ch,
+                                               out_ch,
+                                               norm_layer=norm_layer,
+                                               act_layer=act_layer,
+                                               layer_scale=layer_scale,
+                                               res_scale=res_scale)
+        self.token_mixer = Attention(in_ch, out_ch)
+
+
 class TransitionBlock(nn.Module):
-    def __init__(self, in_ch, out_ch, stride=2, down_mode='stride'):
+    def __init__(self,
+                 in_ch,
+                 out_ch,
+                 stride=2,
+                 bias=False,
+                 norm=None,
+                 act=nn.ReLU6,
+                 down_mode='stride'):
         super(TransitionBlock, self).__init__()
         self.in_ch = in_ch
         self.out_ch = out_ch
 
         if down_mode == 'stride':
             self.layers = nn.Sequential(
-                ConvLayer(in_ch, out_ch, ksize=1),
-                ConvLayer(out_ch, out_ch, stride=stride, groups=out_ch),
+                ConvLayer(in_ch,
+                          in_ch,
+                          ksize=stride,
+                          stride=stride,
+                          padding=0,
+                          groups=in_ch,
+                          bias=bias,
+                          norm=norm,
+                          act=act),
+                ConvLayer(in_ch,
+                          out_ch,
+                          ksize=1,
+                          bias=bias,
+                          norm=norm,
+                          act=act),
             )
 
         elif down_mode == 'maxpool':
             self.layers = nn.Sequential(
-                nn.MaxPool2d(2, 2),
-                ConvLayer(in_ch, out_ch, ksize=1),
+                nn.MaxPool2d(stride, stride),
+                ConvLayer(in_ch,
+                          out_ch,
+                          ksize=1,
+                          bias=bias,
+                          norm=norm,
+                          act=act),
             )
 
     def forward(self, x):
         return self.layers(x)
 
 
+class DCBlock(nn.Module):
+    def __init__(self,
+                 in_ch,
+                 out_ch,
+                 bias=False,
+                 norm=None,
+                 act=nn.ReLU6,
+                 residual=False):
+        super(DCBlock, self).__init__()
+        self.residual = residual
+
+        self.in_ch = in_ch
+        self.out_ch = out_ch
+        hid_ch = in_ch // 2
+
+        self.layers = nn.Sequential(
+            ConvLayer(in_ch, hid_ch, ksize=1, bias=bias, norm=norm, act=act),
+            ConvLayer(hid_ch,
+                      hid_ch,
+                      ksize=3,
+                      groups=hid_ch,
+                      bias=bias,
+                      norm=norm,
+                      act=act),
+            ConvLayer(hid_ch, out_ch, ksize=1, bias=bias, norm=norm, act=None),
+        )
+
+        if residual:
+            self.shortcut = ConvLayer(
+                in_ch, out_ch, ksize=1, bias=bias, norm=norm,
+                act=None) if in_ch != out_ch else nn.Identity()
+        
+        self.act = act()
+
+    def forward(self, x):
+        if self.residual:
+            return self.act(self.layers(x) + self.shortcut(x))
+
+        return self.act(self.layers(x))
+
+
 class ConvBlock(nn.Module):
+    '''Used in NestFuse, RFNNest, MAFusion'''
     def __init__(self, in_ch, out_ch, ksize1=3, ksize2=1):
         super(ConvBlock, self).__init__()
         self.in_ch = in_ch
         self.out_ch = out_ch
+        hid_ch = in_ch // 2
 
         self.layers = nn.Sequential(
-            ConvLayer(in_ch, in_ch // 2, ksize=ksize1),
-            ConvLayer(in_ch // 2, out_ch, ksize=ksize2),
+            ConvLayer(in_ch, hid_ch, ksize=ksize1),
+            ConvLayer(hid_ch, out_ch, ksize=ksize2),
         )
 
     def forward(self, x):
@@ -576,16 +726,19 @@ class ConvBlock(nn.Module):
 
 
 class ECB(ConvBlock):
+    '''Used in UNFusion'''
     def __init__(self, in_ch, out_ch, ksize1=1, ksize2=3):
         super(ECB, self).__init__(in_ch, out_ch, ksize1=ksize1, ksize2=ksize2)
 
 
 class DCB(ConvBlock):
+    '''Used in UNFusion'''
     def __init__(self, in_ch, out_ch, ksize1=3, ksize2=3):
         super(DCB, self).__init__(in_ch, out_ch, ksize1=ksize1, ksize2=ksize2)
 
 
 class RFN(nn.Module):
+    '''Used in RFNNest'''
     def __init__(self, num_ch):
         super(RFN, self).__init__()
         self.res = ConvLayer(num_ch * 2, num_ch)
@@ -610,6 +763,7 @@ class RFN(nn.Module):
 
 
 class NestEncoder(nn.Module):
+    '''Used in UNFusion'''
     def __init__(self, block, in_ch, out_ch, down_mode='stride'):
         super(NestEncoder, self).__init__()
         self.EB2_1 = block(in_ch[1] + in_ch[0], out_ch[1])
@@ -646,6 +800,25 @@ class NestEncoder(nn.Module):
         return feats[0], x2_1, x3_2, x4_3
 
 
+class LSDecoder(nn.Module):
+    '''U-Net: Long Skip Connections'''
+    def __init__(self, block, num_ch, up_mode='bilinear'):
+        super(LSDecoder, self).__init__()
+        self.DB1 = block(num_ch[0] + num_ch[1], num_ch[0])
+        self.DB2 = block(num_ch[1] + num_ch[2], num_ch[1])
+        self.DB3 = block(num_ch[2] + num_ch[3], num_ch[2])
+
+        self.up = Upsample(up_mode, 2)
+
+    def forward(self, feats):
+        y3 = self.DB3(
+            concat_fusion((feats[2], self.up(feats[3], feats[2].shape))))
+        y2 = self.DB2(concat_fusion((feats[1], self.up(y3, feats[1].shape))))
+        y1 = self.DB1(concat_fusion((feats[0], self.up(y2, feats[0].shape))))
+
+        return y1
+
+
 class NestDecoder(nn.Module):
     '''U-Net++: Nested Connections'''
     def __init__(self, block, num_ch, up_mode='bilinear'):
@@ -678,25 +851,6 @@ class NestDecoder(nn.Module):
             concat_fusion((feats[0], x1_1, x1_2, self.up(x2_2, x1_2.shape))))
 
         return x1_3
-
-
-class LSDecoder(nn.Module):
-    '''U-Net: Long Skip Connections'''
-    def __init__(self, block, num_ch, up_mode='bilinear'):
-        super(LSDecoder, self).__init__()
-        self.DB1 = block(num_ch[0] + num_ch[1], num_ch[0])
-        self.DB2 = block(num_ch[1] + num_ch[2], num_ch[1])
-        self.DB3 = block(num_ch[2] + num_ch[3], num_ch[2])
-
-        self.up = Upsample(up_mode, 2)
-
-    def forward(self, feats):
-        y3 = self.DB3(
-            concat_fusion((feats[2], self.up(feats[3], feats[2].shape))))
-        y2 = self.DB2(concat_fusion((feats[1], self.up(y3, feats[1].shape))))
-        y1 = self.DB1(concat_fusion((feats[0], self.up(y2, feats[0].shape))))
-
-        return y1
 
 
 class FSDecoder(nn.Module):

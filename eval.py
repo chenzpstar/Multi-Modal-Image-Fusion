@@ -112,12 +112,13 @@ if __name__ == '__main__':
     # sheet_name = 'metric'
 
     method_list = [
-        'PFNetv1', 'PFNetv2', 'DeepFuse', 'DenseFuse', 'VIFNet', 'DBNet',
-        'SEDRFuse', 'NestFuse', 'RFNNest', 'UNFusion', 'Res2Fusion',
-        'MAFusion', 'IFCNN', 'DIFNet', 'PMGI', 'MyFusion'
+        'DeepFuse', 'DenseFuse', 'VIFNet', 'DBNet', 'SEDRFuse',
+        'NestFuse', 'RFNNest', 'UNFusion', 'Res2Fusion', 'MAFusion',
+        'IFCNN', 'DIFNet', 'PMGI', 'PFNetv1', 'PFNetv2', 'MyFusion'
     ]
     method_names = [method_list[0]]
-    exp_name = 'exp1'
+    exp_name = None
+    # exp_name = 'exp1'
 
     # data_dir = os.path.join(BASE_DIR, 'data', 'samples', args.data)
     data_dir = os.path.join(BASE_DIR, '..', 'datasets', args.data)
@@ -126,14 +127,21 @@ if __name__ == '__main__':
     if args.data in ['tno']:
         img1_dir = os.path.join(data_dir, 'vis')
         img2_dir = os.path.join(data_dir, 'ir')
-    elif args.data in ['roadscene', 'msrs', 'polar']:
+    elif args.data in ['roadscene', 'msrs']:
         img1_dir = os.path.join(data_dir, 'test', 'vis')
         img2_dir = os.path.join(data_dir, 'test', 'ir')
+    elif args.data in ['polar']:
+        img1_dir = os.path.join(data_dir, 'test', 'vis')
+        img2_dir = os.path.join(data_dir, 'test', 'po')
 
-    ckpt_dir = os.path.join(BASE_DIR, '..', 'checkpoints', exp_name, args.ckpt)
-    save_path = os.path.join(ckpt_dir, f'metrics_{args.data}.xlsx')
+    if exp_name is None:
+        ckpt_dir = os.path.join(BASE_DIR, '..', 'checkpoints', args.ckpt)
+    else:
+        ckpt_dir = os.path.join(BASE_DIR, '..', 'checkpoints', exp_name, args.ckpt)
+    # save_path = os.path.join(ckpt_dir, f'metrics_{args.data}.xlsx')
+    save_path = os.path.join(ckpt_dir, f'metrics_{args.data}_{method_names[0]}.xlsx')
 
-    imgf_dir = os.path.join(ckpt_dir, 'test')
+    imgf_dir = os.path.join(ckpt_dir, args.data)
 
     # results_dir = os.path.join(BASE_DIR, '..', 'results', args.data)
     # save_path = os.path.join(results_dir, f'metrics_{args.data}.xlsx')

@@ -186,7 +186,7 @@ def calc_mul_info(img1, img2, normalized=False):
     return mi
 
 
-# 13.Qabf
+# 13.融合性能 Qabf
 def _sobel_fn(img):
     x_sobel = torch.FloatTensor([[-1, 0, 1], [-2, 0, 2],
                                  [-1, 0, 1]]).reshape(1, 1, 3, 3)
@@ -249,12 +249,12 @@ def calc_Qabf(img1, img2, imgf, L=1.5, full=False):
         labf = (RR * ((1.0 - Qaf) * wa +
                       (1.0 - Qbf) * wb)).sum() / (wa + wb).sum()
 
-        return qabf, nabf, labf
+        return qabf, nabf, labf  # qabf + nabf + labf = 1
 
     return (Qaf * wa + Qbf * wb).sum() / (wa + wb).sum()
 
 
-# 14.Nabf
+# 14.融合噪声 Nabf
 def calc_Nabf(img1, img2, imgf, L=1.5, modified=True):
     Qaf, ga, gf = calc_Qxy(img1, imgf, mode='qabf', full=True)
     Qbf, gb = calc_Qxy(img2, imgf, mode='qabf')
@@ -271,7 +271,7 @@ def calc_Nabf(img1, img2, imgf, L=1.5, modified=True):
     return (AM * ((2.0 - Qaf - Qbf) * (wa + wb))).sum() / (wa + wb).sum()
 
 
-# 15.Labf
+# 15.融合损失 Labf
 def calc_Labf(img1, img2, imgf, L=1.5):
     Qaf, ga, gf = calc_Qxy(img1, imgf, mode='qabf', full=True)
     Qbf, gb = calc_Qxy(img2, imgf, mode='qabf')
@@ -284,7 +284,7 @@ def calc_Labf(img1, img2, imgf, L=1.5):
     return (RR * ((1.0 - Qaf) * wa + (1.0 - Qbf) * wb)).sum() / (wa + wb).sum()
 
 
-# 16.ssim
+# 16.结构相似度 ssim
 def _gaussian_kernel(win_size=11, sigma=1.5):
     gauss = torch.FloatTensor([
         exp(-(x - win_size // 2)**2 / (2.0 * sigma**2))
@@ -362,7 +362,7 @@ def calc_ssim(img1,
     return ssim
 
 
-# 17.msssim
+# 17.多尺度结构相似度 msssim
 def calc_msssim(img1, img2, win_size=11, data_range=255.0, use_padding=False):
     weights = torch.FloatTensor([0.0448, 0.2856, 0.3001, 0.2363, 0.1333])
     weights = weights.to(img1, non_blocking=True)
@@ -400,7 +400,7 @@ def calc_msssim(img1, img2, win_size=11, data_range=255.0, use_padding=False):
     return msssim
 
 
-# 18.viff
+# 18.融合视觉信息保真度 viff
 def calc_vif(img1, img2, use_padding=False):
     eps = 1e-10
     sn_sq = 0.005 * 255 * 255

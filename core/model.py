@@ -246,29 +246,24 @@ class DBNet(_FusionModel):
 
 class SEDRFuse(nn.Module):
     '''SEDRFuse: A Symmetric Encoder-Decoder with Residual Block Network for Infrared and Visible Image Fusion'''
-    def __init__(self):
+    def __init__(self, norm=nn.GroupNorm):
         super(SEDRFuse, self).__init__()
         self.encode = nn.ModuleList([
-            ConvLayer(1, 64, norm=nn.GroupNorm),
-            ConvLayer(64, 128, stride=2, norm=nn.GroupNorm),
-            ConvLayer(128, 256, stride=2, norm=nn.GroupNorm),
-            ResBlock(256,
-                     256,
-                     norm1=nn.GroupNorm,
-                     norm2=nn.GroupNorm),
+            ConvLayer(1, 64, norm=norm),
+            ConvLayer(64, 128, stride=2, norm=norm),
+            ConvLayer(128, 256, stride=2, norm=norm),
+            ResBlock(256, 256, norm1=norm, norm2=norm),
         ])
         self.decode = nn.ModuleList([
             ConvLayer(256,
                       128,
                       stride=2,
-                      output_padding=1,
-                      norm=nn.GroupNorm,
+                      norm=norm,
                       layer=nn.ConvTranspose2d),
             ConvLayer(128,
                       64,
                       stride=2,
-                      output_padding=1,
-                      norm=nn.GroupNorm,
+                      norm=norm,
                       layer=nn.ConvTranspose2d),
             ConvLayer(64, 1),
         ])
@@ -526,14 +521,14 @@ class MAFusion(NestFuse):
 
 class IFCNN(_FusionModel):
     '''IFCNN: A General Image Fusion Framework Based on Convolutional Neural Network'''
-    def __init__(self):
+    def __init__(self, norm=nn.BatchNorm2d):
         super(IFCNN, self).__init__()
         self.encode = nn.Sequential(
             ConvLayer(1, 64, ksize=7, act=None),
-            ConvLayer(64, 64, norm=nn.BatchNorm2d),
+            ConvLayer(64, 64, norm=norm),
         )
         self.decode = nn.Sequential(
-            ConvLayer(64, 64, norm=nn.BatchNorm2d),
+            ConvLayer(64, 64, norm=norm),
             ConvLayer(64, 1, ksize=1, act=None),
         )
 
@@ -543,18 +538,18 @@ class IFCNN(_FusionModel):
 
 class DIFNet(_FusionModel):
     '''Unsupervised Deep Image Fusion with Structure Tensor Representations'''
-    def __init__(self):
+    def __init__(self, norm=nn.BatchNorm2d):
         super(DIFNet, self).__init__()
         self.encode = nn.Sequential(
             ConvLayer(1, 16),
-            ResBlock(16, 16, norm1=nn.BatchNorm2d),
-            ResBlock(16, 16, norm1=nn.BatchNorm2d),
+            ResBlock(16, 16, norm1=norm),
+            ResBlock(16, 16, norm1=norm),
         )
         self.fuse = ConvLayer(32, 16, act=None)
         self.decode = nn.Sequential(
-            ResBlock(16, 16, norm1=nn.BatchNorm2d),
-            ResBlock(16, 16, norm1=nn.BatchNorm2d),
-            ResBlock(16, 16, norm1=nn.BatchNorm2d),
+            ResBlock(16, 16, norm1=norm),
+            ResBlock(16, 16, norm1=norm),
+            ResBlock(16, 16, norm1=norm),
             ConvLayer(16, 1, act=None),
         )
 
@@ -567,27 +562,27 @@ class DIFNet(_FusionModel):
 
 class PMGI(nn.Module):
     '''Rethinking the Image Fusion: A Fast Unified Image Fusion Network Based on Proportional Maintenance of Gradient and Intensity'''
-    def __init__(self):
+    def __init__(self, norm=nn.BatchNorm2d, act=nn.LeakyReLU):
         super(PMGI, self).__init__()
         self.gradient = nn.ModuleList([
-            ConvLayer(3, 16, ksize=5, norm=nn.BatchNorm2d, act=nn.LeakyReLU),
-            ConvLayer(16, 16, norm=nn.BatchNorm2d, act=nn.LeakyReLU),
-            ConvLayer(48, 16, norm=nn.BatchNorm2d, act=nn.LeakyReLU),
-            ConvLayer(64, 16, norm=nn.BatchNorm2d, act=nn.LeakyReLU),
+            ConvLayer(3, 16, ksize=5, norm=norm, act=act),
+            ConvLayer(16, 16, norm=norm, act=act),
+            ConvLayer(48, 16, norm=norm, act=act),
+            ConvLayer(64, 16, norm=norm, act=act),
         ])
         self.intensity = nn.ModuleList([
-            ConvLayer(3, 16, ksize=5, norm=nn.BatchNorm2d, act=nn.LeakyReLU),
-            ConvLayer(16, 16, norm=nn.BatchNorm2d, act=nn.LeakyReLU),
-            ConvLayer(48, 16, norm=nn.BatchNorm2d, act=nn.LeakyReLU),
-            ConvLayer(64, 16, norm=nn.BatchNorm2d, act=nn.LeakyReLU),
+            ConvLayer(3, 16, ksize=5, norm=norm, act=act),
+            ConvLayer(16, 16, norm=norm, act=act),
+            ConvLayer(48, 16, norm=norm, act=act),
+            ConvLayer(64, 16, norm=norm, act=act),
         ])
         self.transfer1 = nn.ModuleList([
-            ConvLayer(32, 16, ksize=1, norm=nn.BatchNorm2d, act=nn.LeakyReLU),
-            ConvLayer(32, 16, ksize=1, norm=nn.BatchNorm2d, act=nn.LeakyReLU),
+            ConvLayer(32, 16, ksize=1, norm=norm, act=act),
+            ConvLayer(32, 16, ksize=1, norm=norm, act=act),
         ])
         self.transfer2 = nn.ModuleList([
-            ConvLayer(32, 16, ksize=1, norm=nn.BatchNorm2d, act=nn.LeakyReLU),
-            ConvLayer(32, 16, ksize=1, norm=nn.BatchNorm2d, act=nn.LeakyReLU),
+            ConvLayer(32, 16, ksize=1, norm=norm, act=act),
+            ConvLayer(32, 16, ksize=1, norm=norm, act=act),
         ])
         self.decode = ConvLayer(128, 1, ksize=1, act=nn.Tanh)
 

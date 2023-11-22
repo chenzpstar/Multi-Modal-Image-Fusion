@@ -49,7 +49,7 @@ def _gaussian_fn(img, window, use_padding=False):
     return F.conv2d(img, window, groups=channel)
 
 
-def cmpt_ssim(img1,
+def calc_ssim(img1,
               img2,
               win_size=11,
               window=None,
@@ -110,7 +110,7 @@ def cmpt_ssim(img1,
     return {'ssim': ssim, 'cs': cs, 'sigma': sigma}
 
 
-def cmpt_msssim(img1,
+def calc_msssim(img1,
                 img2,
                 win_size=11,
                 window=None,
@@ -138,7 +138,7 @@ def cmpt_msssim(img1,
     levels = len(weights)
 
     for i in range(levels):
-        out = cmpt_ssim(im1, im2, win_size, window, data_range, use_padding,
+        out = calc_ssim(im1, im2, win_size, window, data_range, use_padding,
                         size_average)
 
         if i < levels - 1:
@@ -177,7 +177,7 @@ class SSIM(nn.Module):
         self.register_buffer('window', window)
 
     def forward(self, img1, img2):
-        return cmpt_ssim(img1,
+        return calc_ssim(img1,
                          img2,
                          window=self.window,
                          data_range=self.data_range,
@@ -199,7 +199,7 @@ class MS_SSIM(SSIM):
         self.register_buffer('weights', weights)
 
     def forward(self, img1, img2):
-        return cmpt_msssim(img1,
+        return calc_msssim(img1,
                            img2,
                            window=self.window,
                            weights=self.weights,

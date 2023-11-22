@@ -22,7 +22,7 @@ from torch.utils.data import DataLoader
 
 from common import AverageMeter, get_test_args, save_result
 from core.block import *
-from core.metric import cmpt_ssim
+from core.metric import calc_ssim
 from core.model import *
 from data.dataset import FusionDataset as Dataset
 
@@ -47,8 +47,8 @@ def test_model(model, data_loader, save_dir=None):
             timer.update(time.time() - start_time)
 
         with torch.no_grad():
-            ssim1 = cmpt_ssim(img1, imgf, data_range=1.0)
-            ssim2 = cmpt_ssim(img2, imgf, data_range=1.0)
+            ssim1 = calc_ssim(img1, imgf, data_range=1.0)
+            ssim2 = calc_ssim(img2, imgf, data_range=1.0)
             avg_ssim = (ssim1 + ssim2) * 0.5
             ssim.update(avg_ssim.item())
 
@@ -77,10 +77,16 @@ if __name__ == '__main__':
     # device = torch.device('cuda:0' if args.gpu else 'cpu')
     # device = torch.device('cpu')
 
+    exp_name = None
+    # exp_name = 'exp1'
+
     data_dir = os.path.join(BASE_DIR, '..', 'datasets', args.data)
     assert os.path.isdir(data_dir)
 
-    ckpt_dir = os.path.join(BASE_DIR, '..', 'checkpoints', args.ckpt)
+    if exp_name is None:
+        ckpt_dir = os.path.join(BASE_DIR, '..', 'checkpoints', args.ckpt)
+    else:
+        ckpt_dir = os.path.join(BASE_DIR, '..', 'checkpoints', exp_name, args.ckpt)
     ckpt_path = os.path.join(ckpt_dir, 'epoch_best.pth')
     # ckpt_path = os.path.join(ckpt_dir, 'epoch_last.pth')
     assert os.path.isfile(ckpt_path)
@@ -88,7 +94,7 @@ if __name__ == '__main__':
     log_path = os.path.join(ckpt_dir, 'train.log')
     assert os.path.isfile(log_path)
 
-    test_save_dir = os.path.join(ckpt_dir, 'test')
+    test_save_dir = os.path.join(ckpt_dir, args.data)
     if not os.path.isdir(test_save_dir):
         os.makedirs(test_save_dir)
 
@@ -109,11 +115,11 @@ if __name__ == '__main__':
 
     # 2. model
     # models = [
-    #     PFNetv1, PFNetv2, DeepFuse, DenseFuse, VIFNet, DBNet, SEDRFuse,
-    #     NestFuse, RFNNest, UNFusion, Res2Fusion, MAFusion, IFCNN, DIFNet, PMGI
+    #     DeepFuse, DenseFuse, VIFNet, DBNet, SEDRFuse, NestFuse, RFNNest,
+    #     UNFusion, Res2Fusion, MAFusion, IFCNN, DIFNet, PMGI, PFNetv1, PFNetv2
     # ]
 
-    # model = models[7]
+    # model = models[0]
     # print(f'model: {model.__name__}')
 
     # model = model().to(device, non_blocking=True)

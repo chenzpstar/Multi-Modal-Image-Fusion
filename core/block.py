@@ -71,7 +71,7 @@ class ConvLayer(nn.Module):
                       ksize,
                       stride,
                       padding,
-                      output_padding=0,
+                      output_padding=1,
                       bias=bias,
                       padding_mode='zeros'))
 

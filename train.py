@@ -223,11 +223,11 @@ if __name__ == '__main__':
 
     # 2. model
     # models = [
-    #     PFNetv1, PFNetv2, DeepFuse, DenseFuse, VIFNet, DBNet, SEDRFuse,
-    #     NestFuse, RFNNest, UNFusion, Res2Fusion, MAFusion, IFCNN, DIFNet, PMGI
+    #     DeepFuse, DenseFuse, VIFNet, DBNet, SEDRFuse, NestFuse, RFNNest,
+    #     UNFusion, Res2Fusion, MAFusion, IFCNN, DIFNet, PMGI, PFNetv1, PFNetv2
     # ]
 
-    # model = models[7]
+    # model = models[0]
     # if local_rank == 0:
     #     logger.info(f'model: {model.__name__}')
 

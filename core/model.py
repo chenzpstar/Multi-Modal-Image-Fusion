@@ -337,15 +337,15 @@ class NestFuse(_FusionModel):
         self.CB3_0 = ConvBlock(num_ch[1], num_ch[2])
         self.CB4_0 = ConvBlock(num_ch[2], num_ch[3])
 
-        if down_mode == 'stride':
-            self.down1 = ConvLayer(num_ch[0], num_ch[0], stride=2)
-            self.down2 = ConvLayer(num_ch[1], num_ch[1], stride=2)
-            self.down3 = ConvLayer(num_ch[2], num_ch[2], stride=2)
-
-        elif down_mode == 'maxpool':
+        if down_mode == 'maxpool':
             self.down1 = nn.MaxPool2d(2, 2)
             self.down2 = nn.MaxPool2d(2, 2)
             self.down3 = nn.MaxPool2d(2, 2)
+            
+        elif down_mode == 'stride':
+            self.down1 = ConvLayer(num_ch[0], num_ch[0], stride=2)
+            self.down2 = ConvLayer(num_ch[1], num_ch[1], stride=2)
+            self.down3 = ConvLayer(num_ch[2], num_ch[2], stride=2)
 
         # decoder
         self.decode = NestDecoder(ConvBlock, num_ch, up_mode)
@@ -359,7 +359,7 @@ class NestFuse(_FusionModel):
 
         return x1_0, x2_0, x3_0, x4_0
 
-    def fusion(self, feats1, feats2, mode='mean'):
+    def fusion(self, feats1, feats2, mode='sca'):
         f1_0 = attention_fusion(feats1[0], feats2[0], mode)
         f2_0 = attention_fusion(feats1[1], feats2[1], mode)
         f3_0 = attention_fusion(feats1[2], feats2[2], mode)
@@ -405,15 +405,15 @@ class UNFusion(_FusionModel):
         self.CB3_0 = ConvLayer(enc_ch[1], enc_ch[2])
         self.CB4_0 = ConvLayer(enc_ch[2], enc_ch[3])
 
-        if down_mode == 'stride':
-            self.down1 = ConvLayer(enc_ch[0], enc_ch[0], stride=2)
-            self.down2 = ConvLayer(enc_ch[1], enc_ch[1], stride=2)
-            self.down3 = ConvLayer(enc_ch[2], enc_ch[2], stride=2)
-
-        elif down_mode == 'maxpool':
+        if down_mode == 'maxpool':
             self.down1 = nn.MaxPool2d(2, 2)
             self.down2 = nn.MaxPool2d(2, 2)
             self.down3 = nn.MaxPool2d(2, 2)
+            
+        elif down_mode == 'stride':
+            self.down1 = ConvLayer(enc_ch[0], enc_ch[0], stride=2)
+            self.down2 = ConvLayer(enc_ch[1], enc_ch[1], stride=2)
+            self.down3 = ConvLayer(enc_ch[2], enc_ch[2], stride=2)
 
         self.encode = NestEncoder(ECB, enc_ch, dec_ch, down_mode)
 
@@ -475,7 +475,7 @@ class Res2Fusion(_FusionModel):
         if mode == 'elem':
             return element_fusion(feat1, feat2, 'mean')
         elif mode == 'attn':
-            return attention_fusion(feat1, feat2, 'mean', spatial, channel)
+            return attention_fusion(feat1, feat2, 'sca', spatial, channel)
         else:
             raise ValueError("only supported ['elem', 'attn'] mode")
 
@@ -493,21 +493,21 @@ class MAFusion(NestFuse):
         self.CB3_0 = ConvBlock(num_ch[1], num_ch[2])
         self.CB4_0 = ConvBlock(num_ch[2], num_ch[3])
 
-        if down_mode == 'stride':
-            self.down1 = ConvLayer(num_ch[0], num_ch[0], stride=2)
-            self.down2 = ConvLayer(num_ch[1], num_ch[1], stride=2)
-            self.down3 = ConvLayer(num_ch[2], num_ch[2], stride=2)
-
-        elif down_mode == 'maxpool':
+        if down_mode == 'maxpool':
             self.down1 = nn.MaxPool2d(2, 2)
             self.down2 = nn.MaxPool2d(2, 2)
             self.down3 = nn.MaxPool2d(2, 2)
+            
+        elif down_mode == 'stride':
+            self.down1 = ConvLayer(num_ch[0], num_ch[0], stride=2)
+            self.down2 = ConvLayer(num_ch[1], num_ch[1], stride=2)
+            self.down3 = ConvLayer(num_ch[2], num_ch[2], stride=2)
 
         # decoder
         self.decode = FSDecoder(ConvBlock, num_ch, up_mode)
         self.conv_out = ConvLayer(num_ch[0], 1, ksize=1)
 
-    def fusion(self, feats1, feats2, mode='mean'):
+    def fusion(self, feats1, feats2, mode='sca'):
         f1_0 = attention_fusion(feats1[0], feats2[0], mode)
         f2_0 = attention_fusion(feats1[1], feats2[1], mode)
         f3_0 = attention_fusion(feats1[2], feats2[2], mode)
@@ -639,52 +639,94 @@ class MyFusion(nn.Module):
     def __init__(self,
                  encoder=SepConvBlock,
                  decoder=NestDecoder,
+                 bias=False,
                  norm=None,
                  act=nn.ReLU6,
+                 fusion_method='attn',
+                 fusion_mode='sca',
                  down_mode='stride',
                  up_mode='bilinear',
                  share_weight_levels=4):
         super(MyFusion, self).__init__()
         num_ch = [16, 32, 64, 128]
+        
+        self.fusion_method = fusion_method
+        self.fusion_mode = fusion_mode
+        self.down_mode = down_mode
+        self.up_mode = up_mode
         self.share_weight_levels = share_weight_levels
 
         # encoder
         self.conv_in_1 = ConvLayer(1,
                                    8,
                                    ksize=1,
-                                   bias=False,
+                                   bias=bias,
                                    norm=norm,
                                    act=act)
-        self.down1_1 = TransitionBlock(8, num_ch[0], stride=1)
+        self.down1_1 = TransitionBlock(8,
+                                       num_ch[0],
+                                       stride=1,
+                                       bias=bias,
+                                       norm=norm,
+                                       act=act)
         self.down2_1 = TransitionBlock(num_ch[0],
                                        num_ch[1],
+                                       stride=2,
+                                       bias=bias,
+                                       norm=norm,
+                                       act=act,
                                        down_mode=down_mode)
         self.down3_1 = TransitionBlock(num_ch[1],
                                        num_ch[2],
+                                       stride=2,
+                                       bias=bias,
+                                       norm=norm,
+                                       act=act,
                                        down_mode=down_mode)
         self.down4_1 = TransitionBlock(num_ch[2],
                                        num_ch[3],
+                                       stride=2,
+                                       bias=bias,
+                                       norm=norm,
+                                       act=act,
                                        down_mode=down_mode)
 
         if share_weight_levels < 4:
             self.conv_in_2 = ConvLayer(1,
                                        8,
                                        ksize=1,
-                                       bias=False,
+                                       bias=bias,
                                        norm=norm,
                                        act=act)
-            self.down1_2 = TransitionBlock(8, num_ch[0], stride=1)
+            self.down1_2 = TransitionBlock(8,
+                                           num_ch[0],
+                                           stride=1,
+                                           bias=bias,
+                                           norm=norm,
+                                           act=act)
         if share_weight_levels < 3:
             self.down2_2 = TransitionBlock(num_ch[0],
                                            num_ch[1],
+                                           stride=2,
+                                           bias=bias,
+                                           norm=norm,
+                                           act=act,
                                            down_mode=down_mode)
         if share_weight_levels < 2:
             self.down3_2 = TransitionBlock(num_ch[1],
                                            num_ch[2],
+                                           stride=2,
+                                           bias=bias,
+                                           norm=norm,
+                                           act=act,
                                            down_mode=down_mode)
         if share_weight_levels < 1:
             self.down4_2 = TransitionBlock(num_ch[2],
                                            num_ch[3],
+                                           stride=2,
+                                           bias=bias,
+                                           norm=norm,
+                                           act=act,
                                            down_mode=down_mode)
 
         if not isinstance(encoder, list):
@@ -704,12 +746,28 @@ class MyFusion(nn.Module):
         if share_weight_levels < 1:
             self.EB4_2 = encoder[3](num_ch[3], num_ch[3])
 
+        # fusion
+        if fusion_method == 'elem':
+            assert fusion_mode in ['sum', 'mean', 'max']
+        elif fusion_method == 'attn':
+            assert fusion_mode in ['sa', 'ca', 'sca']
+        elif fusion_method == 'concat':
+            self.fuse1 = ConvLayer(num_ch[0] * 2, num_ch[0], act=None)
+            self.fuse2 = ConvLayer(num_ch[1] * 2, num_ch[1], act=None)
+            self.fuse3 = ConvLayer(num_ch[2] * 2, num_ch[2], act=None)
+            self.fuse4 = ConvLayer(num_ch[3] * 2, num_ch[3], act=None)
+        elif fusion_method == 'rfn':
+            self.RFN1 = RFN(num_ch[0])
+            self.RFN2 = RFN(num_ch[1])
+            self.RFN3 = RFN(num_ch[2])
+            self.RFN4 = RFN(num_ch[3])
+
         # decoder
         self.decode = decoder(DCBlock, num_ch, up_mode)
         self.conv_out = ConvLayer(num_ch[0],
                                   1,
                                   ksize=1,
-                                  bias=False,
+                                  bias=bias,
                                   norm=norm,
                                   act=act)
 
@@ -747,19 +805,29 @@ class MyFusion(nn.Module):
 
         return (x1_1, x2_1, x3_1, x4_1), (x1_2, x2_2, x3_2, x4_2)
 
-    def fusion(self, feats1, feats2, method='attn', mode='mean'):
-        if method == 'elem':
-            f1 = element_fusion(feats1[0], feats2[0], mode)
-            f2 = element_fusion(feats1[1], feats2[1], mode)
-            f3 = element_fusion(feats1[2], feats2[2], mode)
-            f4 = element_fusion(feats1[3], feats2[3], mode)
-        elif method == 'attn':
-            f1 = attention_fusion(feats1[0], feats2[0], mode)
-            f2 = attention_fusion(feats1[1], feats2[1], mode)
-            f3 = attention_fusion(feats1[2], feats2[2], mode)
-            f4 = attention_fusion(feats1[3], feats2[3], mode)
+    def fusion(self, feats1, feats2):
+        if self.fusion_method == 'elem':
+            f1 = element_fusion(feats1[0], feats2[0], self.fusion_mode)
+            f2 = element_fusion(feats1[1], feats2[1], self.fusion_mode)
+            f3 = element_fusion(feats1[2], feats2[2], self.fusion_mode)
+            f4 = element_fusion(feats1[3], feats2[3], self.fusion_mode)
+        elif self.fusion_method == 'attn':
+            f1 = attention_fusion(feats1[0], feats2[0], self.fusion_mode)
+            f2 = attention_fusion(feats1[1], feats2[1], self.fusion_mode)
+            f3 = attention_fusion(feats1[2], feats2[2], self.fusion_mode)
+            f4 = attention_fusion(feats1[3], feats2[3], self.fusion_mode)
+        elif self.fusion_method == 'concat':
+            f1 = self.fuse1(concat_fusion((feats1[0], feats2[0])))
+            f2 = self.fuse2(concat_fusion((feats1[1], feats2[1])))
+            f3 = self.fuse3(concat_fusion((feats1[2], feats2[2])))
+            f4 = self.fuse4(concat_fusion((feats1[3], feats2[3])))
+        elif self.fusion_method == 'rfn':
+            f1 = self.RFN1(feats1[0], feats2[0])
+            f2 = self.RFN2(feats1[1], feats2[1])
+            f3 = self.RFN3(feats1[2], feats2[2])
+            f4 = self.RFN4(feats1[3], feats2[3])
         else:
-            raise ValueError("only supported ['elem', 'attn'] method")
+            raise ValueError("only supported ['elem', 'attn', 'concat', 'rfn'] method")
 
         return f1, f2, f3, f4
 
@@ -787,13 +855,13 @@ if __name__ == '__main__':
     from thop import clever_format, profile
 
     # models = [
-    #     PFNetv1, PFNetv2, DeepFuse, DenseFuse, VIFNet, DBNet, SEDRFuse,
-    #     NestFuse, RFNNest, UNFusion, Res2Fusion, MAFusion, IFCNN, DIFNet, PMGI
+    #     DeepFuse, DenseFuse, VIFNet, DBNet, SEDRFuse, NestFuse, RFNNest,
+    #     UNFusion, Res2Fusion, MAFusion, IFCNN, DIFNet, PMGI, PFNetv1, PFNetv2
     # ]
-    #
+
     # model = models[0]
     # print(f'model: {model.__name__}')
-    #
+
     # model = model()
 
     encoders = [

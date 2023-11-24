@@ -41,7 +41,7 @@ def concat_fusion(tensors, dim=1):
 
 def attention_fusion(tensor1,
                      tensor2,
-                     mode='mean',
+                     mode='sca',
                      spatial_mode='l1',
                      channel_mode='avg'):
     f_spatial = spatial_fusion(tensor1, tensor2, spatial_mode, softmax=False)
@@ -51,12 +51,12 @@ def attention_fusion(tensor1,
         return f_spatial
     elif mode == 'ca':
         return f_channel
-    elif mode == 'mean':
+    elif mode == 'sca':
         return element_fusion(f_spatial, f_channel, mode)
     elif mode == 'wavg':
         return weighted_fusion(f_spatial, f_channel, f_spatial, f_channel)
     else:
-        raise ValueError("only supported ['sa', 'ca', 'mean', 'wavg'] mode")
+        raise ValueError("only supported ['sa', 'ca', 'sca', 'wavg'] mode")
 
 
 def spatial_fusion(tensor1, tensor2, mode='l1', softmax=True):

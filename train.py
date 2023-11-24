@@ -254,7 +254,27 @@ if __name__ == '__main__':
 
         logger.info(f'decoder: {decoder.__name__}')
 
-    model = MyFusion(encoder, decoder,
+    fusion_methods = ['elem', 'attn', 'concat', 'rfn']
+    fusion_modes = ['sum', 'mean', 'max', 'sa', 'ca', 'sca', None]
+    down_modes = ['maxpool', 'stride']
+    up_modes = ['nearest', 'bilinear']
+
+    fusion_method, fusion_mode = fusion_methods[0], fusion_modes[0]
+    down_mode, up_mode = down_modes[0], up_modes[0]
+
+    if local_rank == 0:
+        logger.info(f'fusion method: {fusion_method}, fusion mode: {fusion_mode}')
+        logger.info(f'down mode: {down_mode}, up mode: {up_mode}')
+
+    model = MyFusion(encoder,
+                     decoder,
+                     bias=False,
+                     norm=None,
+                     act=nn.ReLU6,
+                     fusion_method=fusion_method,
+                     fusion_mode=fusion_mode,
+                     down_mode=down_mode,
+                     up_mode=up_mode,
                      share_weight_levels=4).to(device, non_blocking=True)
 
     if local_rank == 0:
@@ -285,6 +305,7 @@ if __name__ == '__main__':
     ssim_mode, ssim_weight = ssim_modes[0], weights[0]
     pixel_mode, pixel_weight = norm_modes[0], weights[2]
     grad_mode, grad_weight = norm_modes[0], weights[1]
+
     if local_rank == 0:
         logger.info(f'ssim mode: {ssim_mode}, weight: {ssim_weight}')
         logger.info(f'pixel mode: {pixel_mode}, weight: {pixel_weight}')

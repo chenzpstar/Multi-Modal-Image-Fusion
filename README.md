@@ -7,13 +7,13 @@ This project is for personal study and under development, please click 'watch' o
 
 ## 0 使用方法
 
-- 配置：pip install -r requirements.txt
+- 配置：`pip install -r requirements.txt`
 
-- 训练：python train.py --data roadscene
+- 训练：`python train.py --data roadscene`
 
-- 测试：python test.py --data tno --ckpt 2023-02-26_23-15
+- 测试：`python test.py --data tno --ckpt 2023-02-26_23-15`
 
-- 评估：python eval.py --data tno --ckpt 2023-02-26_23-15
+- 评估：`python eval.py --data tno --ckpt 2023-02-26_23-15`
 
 ## 1 任务简述
 

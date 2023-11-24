@@ -18,6 +18,7 @@ import time
 
 import cv2
 import torch
+import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from common import AverageMeter, get_test_args, save_result
@@ -141,7 +142,26 @@ if __name__ == '__main__':
 
     print(f'decoder: {decoder.__name__}')
 
-    model = MyFusion(encoder, decoder,
+    fusion_methods = ['elem', 'attn', 'concat', 'rfn']
+    fusion_modes = ['sum', 'mean', 'max', 'sa', 'ca', 'sca', None]
+    down_modes = ['maxpool', 'stride']
+    up_modes = ['nearest', 'bilinear']
+
+    fusion_method, fusion_mode = fusion_methods[0], fusion_modes[0]
+    down_mode, up_mode = down_modes[0], up_modes[0]
+
+    print(f'fusion method: {fusion_method}, fusion mode: {fusion_mode}')
+    print(f'down mode: {down_mode}, up mode: {up_mode}')
+
+    model = MyFusion(encoder,
+                     decoder,
+                     bias=False,
+                     norm=None,
+                     act=nn.ReLU6,
+                     fusion_method=fusion_method,
+                     fusion_mode=fusion_mode,
+                     down_mode=down_mode,
+                     up_mode=up_mode,
                      share_weight_levels=4).to(device, non_blocking=True)
 
     params = sum([param.nelement() for param in model.parameters()])

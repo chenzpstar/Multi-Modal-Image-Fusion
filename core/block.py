@@ -302,14 +302,15 @@ class Res2ConvBlock(SepConvBlock):
                                             attention=attention)
         width = in_ch
 
+        # Used in Res2Fusion
         # self.dwconvs = nn.ModuleList([
         #     ConvLayer(width,
         #               width,
         #               ksize=3,
-        #               groups=width,
+        #               groups=1,
         #               bias=bias,
         #               norm=norm,
-        #               act=None) if i > 0 else nn.Identity()
+        #               act=act) if i > 0 else nn.Identity()
         #     for i in range(scale)
         # ])
         self.dwconvs = nn.ModuleList([
@@ -633,7 +634,18 @@ class TransitionBlock(nn.Module):
         self.in_ch = in_ch
         self.out_ch = out_ch
 
-        if down_mode == 'stride':
+        if down_mode == 'maxpool':
+            self.layers = nn.Sequential(
+                nn.MaxPool2d(stride, stride),
+                ConvLayer(in_ch,
+                          out_ch,
+                          ksize=1,
+                          bias=bias,
+                          norm=norm,
+                          act=act),
+            )
+            
+        elif down_mode == 'stride':
             self.layers = nn.Sequential(
                 ConvLayer(in_ch,
                           in_ch,
@@ -644,17 +656,6 @@ class TransitionBlock(nn.Module):
                           bias=bias,
                           norm=norm,
                           act=act),
-                ConvLayer(in_ch,
-                          out_ch,
-                          ksize=1,
-                          bias=bias,
-                          norm=norm,
-                          act=act),
-            )
-
-        elif down_mode == 'maxpool':
-            self.layers = nn.Sequential(
-                nn.MaxPool2d(stride, stride),
                 ConvLayer(in_ch,
                           out_ch,
                           ksize=1,
@@ -776,15 +777,15 @@ class NestEncoder(nn.Module):
 
         self.EB4_3 = block(in_ch[3] * 7 + in_ch[2] + out_ch[2], out_ch[3])
 
-        if down_mode == 'stride':
-            self.down1 = ConvLayer(out_ch[1], out_ch[1], stride=2)
-            self.down2 = ConvLayer(in_ch[2] * 2, in_ch[2] * 2, stride=2)
-            self.down3 = ConvLayer(out_ch[2], out_ch[2], stride=2)
-
-        elif down_mode == 'maxpool':
+        if down_mode == 'maxpool':
             self.down1 = nn.MaxPool2d(2, 2)
             self.down2 = nn.MaxPool2d(2, 2)
             self.down3 = nn.MaxPool2d(2, 2)
+            
+        elif down_mode == 'stride':
+            self.down1 = ConvLayer(out_ch[1], out_ch[1], stride=2)
+            self.down2 = ConvLayer(in_ch[2] * 2, in_ch[2] * 2, stride=2)
+            self.down3 = ConvLayer(out_ch[2], out_ch[2], stride=2)
 
     def forward(self, feats):
         x2_1 = self.EB2_1(concat_fusion(feats[1]))

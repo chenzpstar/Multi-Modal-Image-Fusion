@@ -52,7 +52,7 @@ def attention_fusion(tensor1,
     elif mode == 'ca':
         return f_channel
     elif mode == 'sca':
-        return element_fusion(f_spatial, f_channel, mode)
+        return element_fusion(f_spatial, f_channel, 'mean')
     elif mode == 'wavg':
         return weighted_fusion(f_spatial, f_channel, f_spatial, f_channel)
     else:

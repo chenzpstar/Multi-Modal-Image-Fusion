@@ -112,9 +112,9 @@ if __name__ == '__main__':
     # sheet_name = 'metric'
 
     method_list = [
-        'DeepFuse', 'DenseFuse', 'VIFNet', 'DBNet', 'SEDRFuse',
-        'NestFuse', 'RFNNest', 'UNFusion', 'Res2Fusion', 'MAFusion',
-        'IFCNN', 'DIFNet', 'PMGI', 'PFNetv1', 'PFNetv2', 'MyFusion'
+        'DeepFuse', 'DenseFuse', 'VIFNet', 'DBNet', 'SEDRFuse', 'NestFuse',
+        'RFNNest', 'UNFusion', 'Res2Fusion', 'MAFusion', 'IFCNN', 'DIFNet',
+        'PMGI', 'PFNetv1', 'PFNetv2', 'MyFusion'
     ]
     method_names = [method_list[0]]
     exp_name = None
@@ -137,9 +137,11 @@ if __name__ == '__main__':
     if exp_name is None:
         ckpt_dir = os.path.join(BASE_DIR, '..', 'checkpoints', args.ckpt)
     else:
-        ckpt_dir = os.path.join(BASE_DIR, '..', 'checkpoints', exp_name, args.ckpt)
+        ckpt_dir = os.path.join(BASE_DIR, '..', 'checkpoints', exp_name,
+                                args.ckpt)
     # save_path = os.path.join(ckpt_dir, f'metrics_{args.data}.xlsx')
-    save_path = os.path.join(ckpt_dir, f'metrics_{args.data}_{method_names[0]}.xlsx')
+    save_path = os.path.join(ckpt_dir,
+                             f'metrics_{args.data}_{method_names[0]}.xlsx')
 
     imgf_dir = os.path.join(ckpt_dir, args.data)
 

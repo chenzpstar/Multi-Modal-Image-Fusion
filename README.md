@@ -89,4 +89,4 @@ This project is for personal study and under development, please click 'watch' o
 
 - 信息量：信息熵（EN）、交叉熵（CE）、互信息（MI）
 
-- 视觉感知：融合性能（Qabf）、融合噪声（Nabf）、融合损失（Labf）、结构相似度（SSIM）、多尺度结构相似度（MS-SSIM）、融合视觉信息保真度（VIFF）
+- 视觉感知：融合性能（Qabf）、融合伪影（Nabf）、融合损失（Labf）、结构相似度（SSIM）、多尺度结构相似度（MS-SSIM）、融合视觉信息保真度（VIFF）

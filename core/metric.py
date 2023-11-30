@@ -138,7 +138,9 @@ def calc_joint_prob(img1, img2):
 
     im1 = img1.clone()
     im2 = img2.clone()
-    hist = torch.from_numpy(np.histogram2d(im1.numpy().flatten(), im2.numpy().flatten(), 256, ((0, 256), (0, 256)))[0])
+    hist = torch.from_numpy(
+        np.histogram2d(im1.numpy().flatten(),
+                       im2.numpy().flatten(), 256, ((0, 256), (0, 256)))[0])
 
     return hist / im1.numel()
 
@@ -254,7 +256,7 @@ def calc_Qabf(img1, img2, imgf, L=1.5, full=False):
     return (Qaf * wa + Qbf * wb).sum() / (wa + wb).sum()
 
 
-# 14.融合噪声 Nabf
+# 14.融合伪影 Nabf
 def calc_Nabf(img1, img2, imgf, L=1.5, modified=True):
     Qaf, ga, gf = calc_Qxy(img1, imgf, mode='qabf', full=True)
     Qbf, gb = calc_Qxy(img2, imgf, mode='qabf')

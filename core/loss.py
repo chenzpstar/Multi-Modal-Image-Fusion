@@ -397,6 +397,10 @@ if __name__ == '__main__':
     pixel_mode, pixel_weight = norm_modes[0], weights[2]
     grad_mode, grad_weight = norm_modes[0], weights[1]
 
+    print(f'ssim mode: {ssim_mode}, weight: {ssim_weight}')
+    print(f'pixel mode: {pixel_mode}, weight: {pixel_weight}')
+    print(f'grad mode: {grad_mode}, weight: {grad_weight}')
+
     loss_fn1 = SSIMLoss(ssim_mode, weight=ssim_weight)
     loss_fn2 = PixelLoss(pixel_mode, weight=pixel_weight)
     loss_fn3 = GradLoss(grad_mode, weight=grad_weight)

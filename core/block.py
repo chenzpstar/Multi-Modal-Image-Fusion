@@ -18,7 +18,7 @@ __all__ = [
     'ConvLayer', 'ResBlock', 'DenseBlock', 'SepConvBlock', 'MixConvBlock',
     'Res2ConvBlock', 'Attention', 'ConvFormerBlock', 'MixFormerBlock',
     'Res2FormerBlock', 'TransformerBlock', 'TransitionBlock', 'DCBlock',
-    'ConvBlock', 'ECB', 'DCB', 'RFN', 'NestEncoder', 'LSDecoder',
+    'ConvBlock', 'ECB', 'DCB', 'RFN', 'NestEncoder', 'Decoder', 'LSDecoder',
     'NestDecoder', 'FSDecoder', 'Downsample', 'Upsample'
 ]
 
@@ -101,7 +101,8 @@ class ConvLayer(nn.Module):
     def _init_weights(self):
         for m in self.modules():
             if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d)):
-                if self.act in (nn.ReLU, nn.ReLU6, nn.Hardswish, nn.SiLU, nn.GELU):
+                if self.act in (nn.ReLU, nn.ReLU6, nn.Hardswish, nn.SiLU,
+                                nn.GELU):
                     nn.init.kaiming_normal_(m.weight)
                 elif self.act is nn.LeakyReLU:
                     nn.init.kaiming_normal_(m.weight, a=0.2)
@@ -434,12 +435,7 @@ class Attention(nn.Module):
 
 
 class FFN(nn.Module):
-    def __init__(self,
-                 num_ch,
-                 scale=4,
-                 bias=False,
-                 norm=None,
-                 act=nn.ReLU6):
+    def __init__(self, num_ch, scale=4, bias=False, norm=None, act=nn.ReLU6):
         super(FFN, self).__init__()
         self.num_ch = num_ch
         self.scale = scale
@@ -560,7 +556,7 @@ class ConvFormerBlock(MetaFormerBlock):
                                               res_scale=res_scale)
         self.token_mixer = SepConvBlock(in_ch,
                                         out_ch,
-                                        residual=False,
+                                        residual=True,
                                         attention=False)
 
 
@@ -580,7 +576,7 @@ class MixFormerBlock(MetaFormerBlock):
                                              res_scale=res_scale)
         self.token_mixer = MixConvBlock(in_ch,
                                         out_ch,
-                                        residual=False,
+                                        residual=True,
                                         attention=False)
 
 
@@ -600,7 +596,7 @@ class Res2FormerBlock(MetaFormerBlock):
                                               res_scale=res_scale)
         self.token_mixer = Res2ConvBlock(in_ch,
                                          out_ch,
-                                         residual=False,
+                                         residual=True,
                                          attention=False)
 
 
@@ -644,7 +640,7 @@ class TransitionBlock(nn.Module):
                           norm=norm,
                           act=act),
             )
-            
+
         elif down_mode == 'stride':
             self.layers = nn.Sequential(
                 ConvLayer(in_ch,
@@ -699,7 +695,7 @@ class DCBlock(nn.Module):
             self.shortcut = ConvLayer(
                 in_ch, out_ch, ksize=1, bias=bias, norm=norm,
                 act=None) if in_ch != out_ch else nn.Identity()
-        
+
         self.act = act()
 
     def forward(self, x):
@@ -781,7 +777,7 @@ class NestEncoder(nn.Module):
             self.down1 = nn.MaxPool2d(2, 2)
             self.down2 = nn.MaxPool2d(2, 2)
             self.down3 = nn.MaxPool2d(2, 2)
-            
+
         elif down_mode == 'stride':
             self.down1 = ConvLayer(out_ch[1], out_ch[1], stride=2)
             self.down2 = ConvLayer(in_ch[2] * 2, in_ch[2] * 2, stride=2)
@@ -799,6 +795,23 @@ class NestEncoder(nn.Module):
             concat_fusion((feats[3][0], x4_1, x4_2, self.down3(x3_2))))
 
         return feats[0], x2_1, x3_2, x4_3
+
+
+class Decoder(nn.Module):
+    def __init__(self, block, num_ch, up_mode='bilinear'):
+        super(Decoder, self).__init__()
+        self.DB1 = block(num_ch[1], num_ch[0])
+        self.DB2 = block(num_ch[2], num_ch[1])
+        self.DB3 = block(num_ch[3], num_ch[2])
+
+        self.up = Upsample(up_mode, 2)
+
+    def forward(self, feats):
+        y3 = self.DB3(self.up(feats[3], feats[2].shape))
+        y2 = self.DB2(self.up(y3, feats[1].shape))
+        y1 = self.DB1(self.up(y2, feats[0].shape))
+
+        return y1
 
 
 class LSDecoder(nn.Module):

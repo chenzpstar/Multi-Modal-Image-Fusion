@@ -87,7 +87,8 @@ if __name__ == '__main__':
     if exp_name is None:
         ckpt_dir = os.path.join(BASE_DIR, '..', 'checkpoints', args.ckpt)
     else:
-        ckpt_dir = os.path.join(BASE_DIR, '..', 'checkpoints', exp_name, args.ckpt)
+        ckpt_dir = os.path.join(BASE_DIR, '..', 'checkpoints', exp_name,
+                                args.ckpt)
     ckpt_path = os.path.join(ckpt_dir, 'epoch_best.pth')
     # ckpt_path = os.path.join(ckpt_dir, 'epoch_last.pth')
     assert os.path.isfile(ckpt_path)
@@ -115,56 +116,60 @@ if __name__ == '__main__':
     )
 
     # 2. model
-    # models = [
-    #     DeepFuse, DenseFuse, VIFNet, DBNet, SEDRFuse, NestFuse, RFNNest,
-    #     UNFusion, Res2Fusion, MAFusion, IFCNN, DIFNet, PMGI, PFNetv1, PFNetv2
-    # ]
+    classic_model = True
+    # classic_model = False
 
-    # model = models[0]
-    # print(f'model: {model.__name__}')
+    if classic_model:
+        models = [
+            DeepFuse, DenseFuse, VIFNet, DBNet, SEDRFuse, NestFuse, RFNNest,
+            UNFusion, Res2Fusion, MAFusion, IFCNN, DIFNet, PMGI, PFNetv1,
+            PFNetv2
+        ]
 
-    # model = model().to(device, non_blocking=True)
+        model = models[0]
+        print(f'model: {model.__name__}')
 
-    encoders = [
-        SepConvBlock, MixConvBlock, Res2ConvBlock, ConvFormerBlock,
-        MixFormerBlock, Res2FormerBlock, TransformerBlock
-    ]
-    decoders = [LSDecoder, NestDecoder, FSDecoder]
-
-    # encoder = [encoders[-2], encoders[-2], encoders[-1], encoders[-1]]
-    encoder = encoders[0]
-    decoder = decoders[0]
-
-    if not isinstance(encoder, list):
-        print(f'encoder: {encoder.__name__}')
+        model = model().to(device, non_blocking=True)
     else:
-        [print(f'encoder{i + 1}: {e.__name__}') for i, e in enumerate(encoder)]
+        encoders = [
+            SepConvBlock, MixConvBlock, Res2ConvBlock, ConvFormerBlock,
+            MixFormerBlock, Res2FormerBlock, TransformerBlock
+        ]
+        decoders = [Decoder, LSDecoder, NestDecoder, FSDecoder]
+        fusion_methods = ['elem', 'attn', 'concat', 'rfn']
+        fusion_modes = ['sum', 'mean', 'max', 'sa', 'ca', 'sca', 'wavg', None]
+        down_modes = ['maxpool', 'stride']
+        up_modes = ['nearest', 'bilinear']
 
-    print(f'decoder: {decoder.__name__}')
+        # encoder = [encoders[0], encoders[0], encoders[0], encoders[0]]
+        encoder = encoders[0]
+        decoder = decoders[0]
+        fusion_method, fusion_mode = fusion_methods[0], fusion_modes[0]
+        down_mode, up_mode = down_modes[0], up_modes[0]
 
-    fusion_methods = ['elem', 'attn', 'concat', 'rfn']
-    fusion_modes = ['sum', 'mean', 'max', 'sa', 'ca', 'sca', None]
-    down_modes = ['maxpool', 'stride']
-    up_modes = ['nearest', 'bilinear']
+        if not isinstance(encoder, list):
+            print(f'encoder: {encoder.__name__}')
+        else:
+            [
+                print(f'encoder{i + 1}: {e.__name__}')
+                for i, e in enumerate(encoder)
+            ]
+        print(f'decoder: {decoder.__name__}')
+        print(f'fusion method: {fusion_method}, fusion mode: {fusion_mode}')
+        print(f'down mode: {down_mode}, up mode: {up_mode}')
 
-    fusion_method, fusion_mode = fusion_methods[0], fusion_modes[0]
-    down_mode, up_mode = down_modes[0], up_modes[0]
+        model = MyFusion(encoder,
+                         decoder,
+                         bias=False,
+                         norm=None,
+                         act=nn.ReLU6,
+                         fusion_method=fusion_method,
+                         fusion_mode=fusion_mode,
+                         down_mode=down_mode,
+                         up_mode=up_mode,
+                         share_weight_levels=4).to(device, non_blocking=True)
 
-    print(f'fusion method: {fusion_method}, fusion mode: {fusion_mode}')
-    print(f'down mode: {down_mode}, up mode: {up_mode}')
-
-    model = MyFusion(encoder,
-                     decoder,
-                     bias=False,
-                     norm=None,
-                     act=nn.ReLU6,
-                     fusion_method=fusion_method,
-                     fusion_mode=fusion_mode,
-                     down_mode=down_mode,
-                     up_mode=up_mode,
-                     share_weight_levels=4).to(device, non_blocking=True)
-
-    params = sum([param.nelement() for param in model.parameters()])
+    params = sum([param.numel() for param in model.parameters()])
     print(f'params: {params / 1e6:.3f}M')
 
     model.load_state_dict(torch.load(ckpt_path, map_location=device),

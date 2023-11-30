@@ -222,60 +222,61 @@ if __name__ == '__main__':
     )
 
     # 2. model
-    # models = [
-    #     DeepFuse, DenseFuse, VIFNet, DBNet, SEDRFuse, NestFuse, RFNNest,
-    #     UNFusion, Res2Fusion, MAFusion, IFCNN, DIFNet, PMGI, PFNetv1, PFNetv2
-    # ]
+    classic_model = True
+    # classic_model = False
 
-    # model = models[0]
-    # if local_rank == 0:
-    #     logger.info(f'model: {model.__name__}')
+    if classic_model:
+        models = [
+            DeepFuse, DenseFuse, VIFNet, DBNet, SEDRFuse, NestFuse, RFNNest,
+            UNFusion, Res2Fusion, MAFusion, IFCNN, DIFNet, PMGI, PFNetv1,
+            PFNetv2
+        ]
 
-    # model = model().to(device, non_blocking=True)
+        model = models[0]
+        if local_rank == 0:
+            logger.info(f'model: {model.__name__}')
 
-    encoders = [
-        SepConvBlock, MixConvBlock, Res2ConvBlock, ConvFormerBlock,
-        MixFormerBlock, Res2FormerBlock, TransformerBlock
-    ]
-    decoders = [LSDecoder, NestDecoder, FSDecoder]
+        model = model().to(device, non_blocking=True)
+    else:
+        encoders = [
+            SepConvBlock, MixConvBlock, Res2ConvBlock, ConvFormerBlock,
+            MixFormerBlock, Res2FormerBlock, TransformerBlock
+        ]
+        decoders = [Decoder, LSDecoder, NestDecoder, FSDecoder]
+        fusion_methods = ['elem', 'attn', 'concat', 'rfn']
+        fusion_modes = ['sum', 'mean', 'max', 'sa', 'ca', 'sca', 'wavg', None]
+        down_modes = ['maxpool', 'stride']
+        up_modes = ['nearest', 'bilinear']
 
-    # encoder = [encoders[-2], encoders[-2], encoders[-1], encoders[-1]]
-    encoder = encoders[0]
-    decoder = decoders[0]
+        # encoder = [encoders[0], encoders[0], encoders[0], encoders[0]]
+        encoder = encoders[0]
+        decoder = decoders[0]
+        fusion_method, fusion_mode = fusion_methods[0], fusion_modes[0]
+        down_mode, up_mode = down_modes[0], up_modes[0]
 
-    if local_rank == 0:
-        if not isinstance(encoder, list):
-            logger.info(f'encoder: {encoder.__name__}')
-        else:
-            [
-                logger.info(f'encoder{i + 1}: {e.__name__}')
-                for i, e in enumerate(encoder)
-            ]
+        if local_rank == 0:
+            if not isinstance(encoder, list):
+                logger.info(f'encoder: {encoder.__name__}')
+            else:
+                [
+                    logger.info(f'encoder{i + 1}: {e.__name__}')
+                    for i, e in enumerate(encoder)
+                ]
+            logger.info(f'decoder: {decoder.__name__}')
+            logger.info(
+                f'fusion method: {fusion_method}, fusion mode: {fusion_mode}')
+            logger.info(f'down mode: {down_mode}, up mode: {up_mode}')
 
-        logger.info(f'decoder: {decoder.__name__}')
-
-    fusion_methods = ['elem', 'attn', 'concat', 'rfn']
-    fusion_modes = ['sum', 'mean', 'max', 'sa', 'ca', 'sca', None]
-    down_modes = ['maxpool', 'stride']
-    up_modes = ['nearest', 'bilinear']
-
-    fusion_method, fusion_mode = fusion_methods[0], fusion_modes[0]
-    down_mode, up_mode = down_modes[0], up_modes[0]
-
-    if local_rank == 0:
-        logger.info(f'fusion method: {fusion_method}, fusion mode: {fusion_mode}')
-        logger.info(f'down mode: {down_mode}, up mode: {up_mode}')
-
-    model = MyFusion(encoder,
-                     decoder,
-                     bias=False,
-                     norm=None,
-                     act=nn.ReLU6,
-                     fusion_method=fusion_method,
-                     fusion_mode=fusion_mode,
-                     down_mode=down_mode,
-                     up_mode=up_mode,
-                     share_weight_levels=4).to(device, non_blocking=True)
+        model = MyFusion(encoder,
+                         decoder,
+                         bias=False,
+                         norm=None,
+                         act=nn.ReLU6,
+                         fusion_method=fusion_method,
+                         fusion_mode=fusion_mode,
+                         down_mode=down_mode,
+                         up_mode=up_mode,
+                         share_weight_levels=4).to(device, non_blocking=True)
 
     if local_rank == 0:
         params = sum([param.numel() for param in model.parameters()])

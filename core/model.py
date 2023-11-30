@@ -255,16 +255,8 @@ class SEDRFuse(nn.Module):
             ResBlock(256, 256, norm1=norm, norm2=norm),
         ])
         self.decode = nn.ModuleList([
-            ConvLayer(256,
-                      128,
-                      stride=2,
-                      norm=norm,
-                      layer=nn.ConvTranspose2d),
-            ConvLayer(128,
-                      64,
-                      stride=2,
-                      norm=norm,
-                      layer=nn.ConvTranspose2d),
+            ConvLayer(256, 128, stride=2, norm=norm, layer=nn.ConvTranspose2d),
+            ConvLayer(128, 64, stride=2, norm=norm, layer=nn.ConvTranspose2d),
             ConvLayer(64, 1),
         ])
 
@@ -341,7 +333,7 @@ class NestFuse(_FusionModel):
             self.down1 = nn.MaxPool2d(2, 2)
             self.down2 = nn.MaxPool2d(2, 2)
             self.down3 = nn.MaxPool2d(2, 2)
-            
+
         elif down_mode == 'stride':
             self.down1 = ConvLayer(num_ch[0], num_ch[0], stride=2)
             self.down2 = ConvLayer(num_ch[1], num_ch[1], stride=2)
@@ -409,7 +401,7 @@ class UNFusion(_FusionModel):
             self.down1 = nn.MaxPool2d(2, 2)
             self.down2 = nn.MaxPool2d(2, 2)
             self.down3 = nn.MaxPool2d(2, 2)
-            
+
         elif down_mode == 'stride':
             self.down1 = ConvLayer(enc_ch[0], enc_ch[0], stride=2)
             self.down2 = ConvLayer(enc_ch[1], enc_ch[1], stride=2)
@@ -497,7 +489,7 @@ class MAFusion(NestFuse):
             self.down1 = nn.MaxPool2d(2, 2)
             self.down2 = nn.MaxPool2d(2, 2)
             self.down3 = nn.MaxPool2d(2, 2)
-            
+
         elif down_mode == 'stride':
             self.down1 = ConvLayer(num_ch[0], num_ch[0], stride=2)
             self.down2 = ConvLayer(num_ch[1], num_ch[1], stride=2)
@@ -649,7 +641,7 @@ class MyFusion(nn.Module):
                  share_weight_levels=4):
         super(MyFusion, self).__init__()
         num_ch = [16, 32, 64, 128]
-        
+
         self.fusion_method = fusion_method
         self.fusion_mode = fusion_mode
         self.down_mode = down_mode
@@ -750,7 +742,7 @@ class MyFusion(nn.Module):
         if fusion_method == 'elem':
             assert fusion_mode in ['sum', 'mean', 'max']
         elif fusion_method == 'attn':
-            assert fusion_mode in ['sa', 'ca', 'sca']
+            assert fusion_mode in ['sa', 'ca', 'sca', 'wavg']
         elif fusion_method == 'concat':
             self.fuse1 = ConvLayer(num_ch[0] * 2, num_ch[0], act=None)
             self.fuse2 = ConvLayer(num_ch[1] * 2, num_ch[1], act=None)
@@ -827,7 +819,8 @@ class MyFusion(nn.Module):
             f3 = self.RFN3(feats1[2], feats2[2])
             f4 = self.RFN4(feats1[3], feats2[3])
         else:
-            raise ValueError("only supported ['elem', 'attn', 'concat', 'rfn'] method")
+            raise ValueError(
+                "only supported ['elem', 'attn', 'concat', 'rfn'] method")
 
         return f1, f2, f3, f4
 
@@ -854,39 +847,70 @@ if __name__ == '__main__':
     import time
     from thop import clever_format, profile
 
-    # models = [
-    #     DeepFuse, DenseFuse, VIFNet, DBNet, SEDRFuse, NestFuse, RFNNest,
-    #     UNFusion, Res2Fusion, MAFusion, IFCNN, DIFNet, PMGI, PFNetv1, PFNetv2
-    # ]
+    classic_model = True
+    # classic_model = False
 
-    # model = models[0]
-    # print(f'model: {model.__name__}')
+    if classic_model:
+        models = [
+            DeepFuse, DenseFuse, VIFNet, DBNet, SEDRFuse, NestFuse, RFNNest,
+            UNFusion, Res2Fusion, MAFusion, IFCNN, DIFNet, PMGI, PFNetv1,
+            PFNetv2
+        ]
 
-    # model = model()
+        model = models[0]
+        print(f'model: {model.__name__}')
 
-    encoders = [
-        SepConvBlock, MixConvBlock, Res2ConvBlock, ConvFormerBlock,
-        MixFormerBlock, Res2FormerBlock, TransformerBlock
-    ]
-    decoders = [LSDecoder, NestDecoder, FSDecoder]
-
-    # encoder = [encoders[-2], encoders[-2], encoders[-1], encoders[-1]]
-    encoder = encoders[0]
-    decoder = decoders[0]
-
-    if not isinstance(encoder, list):
-        print(f'encoder: {encoder.__name__}')
+        model = model()
     else:
-        [print(f'encoder{i + 1}: {e.__name__}') for i, e in enumerate(encoder)]
+        encoders = [
+            SepConvBlock, MixConvBlock, Res2ConvBlock, ConvFormerBlock,
+            MixFormerBlock, Res2FormerBlock, TransformerBlock
+        ]
+        decoders = [Decoder, LSDecoder, NestDecoder, FSDecoder]
+        fusion_methods = ['elem', 'attn', 'concat', 'rfn']
+        fusion_modes = ['sum', 'mean', 'max', 'sa', 'ca', 'sca', 'wavg', None]
+        down_modes = ['maxpool', 'stride']
+        up_modes = ['nearest', 'bilinear']
 
-    print(f'decoder: {decoder.__name__}')
+        # encoder = [encoders[0], encoders[0], encoders[0], encoders[0]]
+        encoder = encoders[0]
+        decoder = decoders[0]
+        fusion_method, fusion_mode = fusion_methods[0], fusion_modes[0]
+        down_mode, up_mode = down_modes[0], up_modes[0]
 
-    model = MyFusion(encoder, decoder, share_weight_levels=4)
+        if not isinstance(encoder, list):
+            print(f'encoder: {encoder.__name__}')
+        else:
+            [
+                print(f'encoder{i + 1}: {e.__name__}')
+                for i, e in enumerate(encoder)
+            ]
+        print(f'decoder: {decoder.__name__}')
+        print(f'fusion method: {fusion_method}, fusion mode: {fusion_mode}')
+        print(f'down mode: {down_mode}, up mode: {up_mode}')
+
+        model = MyFusion(encoder,
+                         decoder,
+                         bias=False,
+                         norm=None,
+                         act=nn.ReLU6,
+                         fusion_method=fusion_method,
+                         fusion_mode=fusion_mode,
+                         down_mode=down_mode,
+                         up_mode=up_mode,
+                         share_weight_levels=4)
 
     params = sum([param.numel() for param in model.parameters()])
     print(f'params: {params / 1e6:.3f}M')
 
     # print(model)
+
+    # x1 = torch.rand(2, 1, 256, 256)
+    # x2 = torch.rand(2, 1, 256, 256)
+
+    # # out = model(x1)
+    # out = model(x1, x2)
+    # print(out.shape)
 
     x1 = torch.rand(1, 1, 256, 256)
     x2 = torch.rand(1, 1, 256, 256)
@@ -894,10 +918,6 @@ if __name__ == '__main__':
     flops, params = profile(model, inputs=(x1, x2))
     flops, params = clever_format([flops, params], '%.3f')
     print(f'params: {params}, flops: {flops}')
-
-    # # out = model(x1)
-    # out = model(x1, x2)
-    # print(out.shape)
 
     t = 0.0
     for i in range(51):
